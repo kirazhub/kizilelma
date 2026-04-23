@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "FONKODU": "AFA",
+      "FONUNVAN": "Ak Portföy Para Piyasası Fonu",
+      "FIYAT": 1.234567,
+      "TARIH": "23.04.2026",
+      "GETIRI1G": 0.15,
+      "GETIRI1H": 1.05,
+      "GETIRI1A": 4.20,
+      "GETIRI3A": 12.50,
+      "GETIRI6A": 25.80,
+      "GETIRI1Y": 48.50,
+      "FONTUR": "Para Piyasası Fonu"
+    },
+    {
+      "FONKODU": "TGE",
+      "FONUNVAN": "Test Serbest Fonu (Nitelikli Yatırımcıya)",
+      "FIYAT": 5.678901,
+      "TARIH": "23.04.2026",
+      "GETIRI1G": 0.85,
+      "GETIRI1H": 4.20,
+      "GETIRI1A": 18.50,
+      "GETIRI3A": 55.20,
+      "GETIRI6A": 110.40,
+      "GETIRI1Y": 280.50,
+      "FONTUR": "Serbest Fon"
+    }
+  ]
+}

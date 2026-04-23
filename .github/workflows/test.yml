@@ -1,0 +1,32 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop, "kizilelma-v1-implementasyon"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        env:
+          TCMB_API_KEY: test_key
+          ANTHROPIC_API_KEY: test_key
+          TELEGRAM_BOT_TOKEN: test_key
+          TELEGRAM_CHAT_ID: "12345"
+        run: pytest -v

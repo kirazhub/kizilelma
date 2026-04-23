@@ -1,0 +1,159 @@
+"""SQLite DB erişim katmanı.
+
+Snapshot'ları ve raporları saklar; tarihsel sorgular için yardımcılar sağlar.
+"""
+import datetime as dt
+import json
+import logging
+import os
+from typing import Optional
+
+from sqlmodel import Session, SQLModel, create_engine, select
+
+from kizilelma.ai_advisor.advisor import AdvisorReport
+from kizilelma.models import MarketSnapshot
+from kizilelma.storage.models import (
+    FundRecord,
+    RepoRecord,
+    ReportRecord,
+    SnapshotRecord,
+)
+
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_DB_PATH = "kizilelma.db"
+
+
+def get_engine(db_path: Optional[str] = None):
+    """SQLite engine döndür."""
+    path = db_path or os.getenv("KIZILELMA_DB", DEFAULT_DB_PATH)
+    url = f"sqlite:///{path}"
+    return create_engine(url, echo=False)
+
+
+def init_db(engine=None) -> None:
+    """Tabloları oluştur (varsa atla)."""
+    engine = engine or get_engine()
+    SQLModel.metadata.create_all(engine)
+
+
+def save_snapshot(snapshot: MarketSnapshot, engine=None) -> int:
+    """Bir MarketSnapshot'ı DB'ye yaz, snapshot_id döndür."""
+    engine = engine or get_engine()
+    with Session(engine) as session:
+        record = SnapshotRecord(
+            timestamp=snapshot.timestamp,
+            fund_count=len(snapshot.funds),
+            bond_count=len(snapshot.bonds),
+            sukuk_count=len(snapshot.sukuks),
+            repo_count=len(snapshot.repo_rates),
+            eurobond_count=len(snapshot.eurobonds),
+            news_count=len(snapshot.news),
+            errors_json=json.dumps(snapshot.errors, ensure_ascii=False),
+        )
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        snap_id = record.id
+
+        # Fonları kaydet
+        for f in snapshot.funds:
+            session.add(
+                FundRecord(
+                    snapshot_id=snap_id,
+                    code=f.code,
+                    name=f.name,
+                    category=f.category,
+                    price=float(f.price),
+                    date=f.date,
+                    return_1d=_to_float(f.return_1d),
+                    return_1w=_to_float(f.return_1w),
+                    return_1m=_to_float(f.return_1m),
+                    return_3m=_to_float(f.return_3m),
+                    return_6m=_to_float(f.return_6m),
+                    return_1y=_to_float(f.return_1y),
+                    is_qualified_investor=f.is_qualified_investor,
+                )
+            )
+
+        # Repo kayıtları
+        for r in snapshot.repo_rates:
+            session.add(
+                RepoRecord(
+                    snapshot_id=snap_id,
+                    type=r.type,
+                    maturity=r.maturity,
+                    rate=float(r.rate),
+                    date=r.date,
+                )
+            )
+
+        session.commit()
+        return snap_id
+
+
+def save_report(
+    report: AdvisorReport,
+    snapshot_id: int,
+    sent_messages: int,
+    status: str,
+    engine=None,
+) -> int:
+    """Bir AdvisorReport'u DB'ye yaz, report_id döndür."""
+    engine = engine or get_engine()
+    with Session(engine) as session:
+        record = ReportRecord(
+            snapshot_id=snapshot_id,
+            timestamp=dt.datetime.now(),
+            fund_section=report.fund_section,
+            serbest_fund_section=report.serbest_fund_section,
+            bond_section=report.bond_section,
+            sukuk_section=report.sukuk_section,
+            repo_section=report.repo_section,
+            eurobond_section=report.eurobond_section,
+            news_section=report.news_section,
+            summary_section=report.summary_section,
+            sent_messages=sent_messages,
+            status=status,
+        )
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        return record.id
+
+
+def get_recent_snapshots(limit: int = 10, engine=None) -> list[SnapshotRecord]:
+    """En yeni snapshot kayıtlarını döner."""
+    engine = engine or get_engine()
+    with Session(engine) as session:
+        statement = (
+            select(SnapshotRecord)
+            .order_by(SnapshotRecord.timestamp.desc())
+            .limit(limit)
+        )
+        return list(session.exec(statement))
+
+
+def get_fund_history(
+    fund_code: str,
+    limit: int = 30,
+    engine=None,
+) -> list[FundRecord]:
+    """Belirli bir fonun geçmiş kayıtlarını döner."""
+    engine = engine or get_engine()
+    with Session(engine) as session:
+        statement = (
+            select(FundRecord)
+            .where(FundRecord.code == fund_code)
+            .order_by(FundRecord.date.desc())
+            .limit(limit)
+        )
+        return list(session.exec(statement))
+
+
+def _to_float(value) -> Optional[float]:
+    """Decimal/None → float/None."""
+    if value is None:
+        return None
+    return float(value)

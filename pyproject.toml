@@ -13,6 +13,7 @@ dependencies = [
     "pytz>=2024.1",
     "anthropic>=0.25.0",
     "python-telegram-bot>=21.0",
+    "apscheduler>=3.10.0",
 ]
 
 [project.optional-dependencies]
@@ -26,3 +27,6 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[project.scripts]
+kizilelma = "kizilelma.main:cli"

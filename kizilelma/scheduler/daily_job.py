@@ -93,8 +93,16 @@ async def _safe(coro_fn, name: str) -> dict:
 
 async def run_daily_job() -> dict[str, Any]:
     """Tüm günlük akışı tek seferde çalıştır."""
+    from kizilelma.storage.db import init_db, save_snapshot, save_report
+
     config = get_config()
     logger.info("=== Kızılelma günlük rapor başladı ===")
+
+    # 0. DB hazırla
+    try:
+        init_db()
+    except Exception as exc:
+        logger.warning(f"DB init başarısız: {exc}")
 
     # 1. Veri topla
     snapshot = await collect_all_data()
@@ -116,6 +124,19 @@ async def run_daily_job() -> dict[str, Any]:
     sent = await sender.send_report(report)
     logger.info(f"{sent} mesaj gönderildi")
 
+    # 4. DB'ye kaydet
+    snapshot_id = None
+    try:
+        snapshot_id = save_snapshot(snapshot)
+        save_report(
+            report, snapshot_id=snapshot_id,
+            sent_messages=sent,
+            status="success" if sent > 0 and not snapshot.errors else "partial",
+        )
+        logger.info(f"DB'ye kaydedildi: snapshot_id={snapshot_id}")
+    except Exception as exc:
+        logger.warning(f"DB kayıt başarısız: {exc}")
+
     # Sonuç
     if sent == 0:
         status = "failed"
@@ -129,5 +150,6 @@ async def run_daily_job() -> dict[str, Any]:
         "sent_messages": sent,
         "snapshot_errors": snapshot.errors,
         "report_errors": report.errors,
+        "snapshot_id": snapshot_id,
         "timestamp": snapshot.timestamp.isoformat(),
     }

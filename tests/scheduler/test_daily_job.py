@@ -90,3 +90,42 @@ async def test_run_daily_job_full_flow(monkeypatch):
 
     assert result["sent_messages"] == 1
     assert result["status"] in ("success", "partial")
+
+
+@pytest.mark.asyncio
+async def test_daily_job_persists_to_db(monkeypatch, tmp_path):
+    """Daily job snapshot ve raporu DB'ye kaydeder."""
+    monkeypatch.setenv("TCMB_API_KEY", "x")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "x")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "x")
+    monkeypatch.setenv("KIZILELMA_DB", str(tmp_path / "test.db"))
+
+    from kizilelma.storage.db import init_db, get_recent_snapshots, get_engine
+
+    engine = get_engine()
+    init_db(engine)
+
+    with patch("kizilelma.scheduler.daily_job.collect_all_data") as collect_mock, \
+         patch("kizilelma.scheduler.daily_job.AIAdvisor") as advisor_cls, \
+         patch("kizilelma.scheduler.daily_job.TelegramSender") as tg_cls:
+        collect_mock.return_value = MarketSnapshot(timestamp=dt.datetime.now())
+        advisor_cls.return_value.generate_report = AsyncMock(
+            return_value=MagicMock(
+                fund_section="test",
+                serbest_fund_section=None,
+                bond_section=None,
+                sukuk_section=None,
+                repo_section=None,
+                eurobond_section=None,
+                news_section=None,
+                summary_section="özet",
+                errors=[],
+            )
+        )
+        tg_cls.return_value.send_report = AsyncMock(return_value=8)
+
+        await run_daily_job()
+
+    snapshots = get_recent_snapshots(limit=5, engine=engine)
+    assert len(snapshots) >= 1

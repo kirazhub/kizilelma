@@ -10,20 +10,28 @@ from kizilelma.telegram_bot.formatters import (
 )
 
 
-def test_split_into_messages_returns_8_sections():
-    """AdvisorReport 8 bölümlük mesaj listesine çevrilir (boş olanlar atılır)."""
+def test_split_into_messages_returns_all_sections():
+    """AdvisorReport tüm veri bölümleri için mesaj üretir (haber hariç).
+
+    Yeni yapıda 11 bölüm var: 6 fon kategorisi + 4 sabit getirili + özet.
+    news_section kullanıcı talebiyle kaldırıldı; doldurulsa bile SECTION_ORDER
+    içinde olmadığı için mesaj olarak gönderilmez.
+    """
     report = AdvisorReport(
-        fund_section="📊 Fonlar içerik",
-        serbest_fund_section="💎 Serbest içerik",
-        bond_section="🏛️ Tahvil içerik",
-        sukuk_section="🕌 Sukuk içerik",
-        repo_section="🔄 Repo içerik",
-        eurobond_section="🌍 Eurobond içerik",
-        news_section="📰 Haberler içerik",
-        summary_section="🎯 Özet içerik",
+        fund_section="📊 Para Piy.",
+        hisse_section="📈 Hisse",
+        karma_section="🎯 Karma",
+        serbest_fund_section="💎 Serbest",
+        katilim_section="🕌 Katılım",
+        borc_section="📜 Borçlanma",
+        bond_section="🏛️ Tahvil",
+        sukuk_section="🕌 Sukuk",
+        eurobond_section="🌍 Eurobond",
+        repo_section="🔄 Repo",
+        summary_section="🎯 Özet",
     )
     messages = split_into_messages(report)
-    assert len(messages) == 8
+    assert len(messages) == 11
 
 
 def test_split_skips_empty_sections():

@@ -16,16 +16,21 @@ LEGAL_NOTICE = (
 )
 
 
-# Bölümlerin sırası (sabit)
+# Bölümlerin sırası (sabit). Her bölüm bir Telegram mesajı olur.
+# Sıralama: önce fon kategorileri, sonra sabit getirili, sonra özet.
+# news_section kullanıcı talebiyle kaldırıldı.
 SECTION_ORDER = [
-    "fund_section",
-    "serbest_fund_section",
-    "bond_section",
-    "sukuk_section",
-    "repo_section",
-    "eurobond_section",
-    "news_section",
-    "summary_section",
+    "fund_section",          # 📊 Para Piyasası
+    "hisse_section",         # 📈 Hisse
+    "karma_section",         # 🎯 Karma / Değişken
+    "serbest_fund_section",  # 💎 Serbest / Nitelikli
+    "katilim_section",       # 🕌 Katılım
+    "borc_section",          # 📜 Borçlanma / Tahvil fonları
+    "bond_section",          # 🏛️ DİBS
+    "sukuk_section",         # 🕌 Sukuk
+    "eurobond_section",      # 🌍 Eurobond
+    "repo_section",          # 🔄 TCMB / Repo
+    "summary_section",       # 🎯 Günün Zirveleri
 ]
 
 

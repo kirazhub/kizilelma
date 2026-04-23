@@ -35,16 +35,14 @@ async def test_telegram_sender_continues_on_individual_failure():
         summary_section="🎯 Üçüncü",
     )
 
-    # Markdown başarısız → fallback (sade) → success
-    # Bu test: "Markdown patlasa bile devam et" davranışını doğrular
+    # Sade metin gönderilir (parse_mode yok), bir hata olursa sadece
+    # o mesaj atlanır, diğerleri akar.
     fake_bot = AsyncMock()
-    # 1. mesaj OK, 2. mesaj her iki denemede de fail, 3. mesaj OK
     fake_bot.send_message = AsyncMock(
         side_effect=[
-            None,  # 1. mesaj markdown OK
-            Exception("Markdown error"),  # 2. mesaj markdown fail
-            Exception("Plain fail too"),  # 2. mesaj plain de fail
-            None,  # 3. mesaj markdown OK
+            None,  # 1. mesaj OK
+            Exception("Network error"),  # 2. mesaj fail
+            None,  # 3. mesaj OK
         ]
     )
 
@@ -54,6 +52,7 @@ async def test_telegram_sender_continues_on_individual_failure():
 
     # 3 denendi, 2 başarılı (1. ve 3.)
     assert sent_count == 2
+    assert fake_bot.send_message.call_count == 3
 
 
 @pytest.mark.asyncio

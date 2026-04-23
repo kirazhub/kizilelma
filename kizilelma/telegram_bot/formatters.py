@@ -12,7 +12,7 @@ from kizilelma.ai_advisor.advisor import AdvisorReport
 
 MAX_MESSAGE_LENGTH = 4096
 LEGAL_NOTICE = (
-    "_Bu rapor yatırım tavsiyesi değildir; bilgilendirme amaçlıdır._"
+    "Bu rapor yatırım tavsiyesi değildir; bilgilendirme amaçlıdır."
 )
 
 
@@ -97,7 +97,7 @@ def add_header_and_footer(
 ) -> str:
     """Mesaja başlık ve altlık ekle."""
     date_str = timestamp.strftime("%d.%m.%Y")
-    header = f"🌅 *KIZILELMA RAPORU* — {date_str} \\({index}/{total}\\)\n\n"
+    header = f"🌅 KIZILELMA RAPORU — {date_str} ({index}/{total})\n\n"
     footer = f"\n\n{LEGAL_NOTICE}"
     return header + body + footer
 

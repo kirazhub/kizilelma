@@ -14,14 +14,16 @@ güncel piyasa verilerini değerlendirip, üç farklı yatırımcı profili içi
 (muhafazakâr, dengeli, agresif) öneri üretmek.
 
 Kuralların:
-1. **Türkçe ve sade dil kullan.** Teknik terim kullanırsan parantez içinde açıkla.
-2. **3 profilli yaklaşım:** Her bölümün sonunda muhafazakâr/dengeli/agresif için
+1. Türkçe ve sade dil kullan. Teknik terim kullanırsan parantez içinde açıkla.
+2. 3 profilli yaklaşım: Her bölümün sonunda muhafazakâr/dengeli/agresif için
    ayrı kısa öneri ver.
-3. **Veriye sadık kal.** Veride olmayan rakamı uydurma. Belirsizlik varsa "veri yetersiz" de.
-4. **Yasal uyarı:** Verdiğin bilgi yatırım tavsiyesi DEĞİLDİR, sadece bilgilendirme
+3. Veriye sadık kal. Veride olmayan rakamı uydurma. Belirsizlik varsa "veri yetersiz" de.
+4. Yasal uyarı: Verdiğin bilgi yatırım tavsiyesi DEĞİLDİR, sadece bilgilendirme
    amaçlıdır. Bunu her bölümün sonunda hatırlatma şart değil ama unutturma.
-5. **Madde işaretleri kullan**, düz paragraf yerine. Telegram mesajında okunmalı.
-6. **Kısa ve öz yaz.** Her bölüm en fazla 8-10 satır olsun.
+5. Madde işaretleri kullan, düz paragraf yerine. Telegram mesajında okunmalı.
+6. Kısa ve öz yaz. Her bölüm en fazla 8-10 satır olsun.
+7. Markdown formatı (*, _) KULLANMA — Telegram mesajları sade metin olarak gönderilir.
+   Vurgu için sadece EMOJI ve BÜYÜK HARF kullan.
 """
 
 
@@ -41,15 +43,15 @@ def build_fund_section_prompt(top_funds: list[FundData]) -> str:
 
 {funds_text}
 
-Bu verilere bakarak şu yapıda bir Türkçe rapor yaz:
+Bu verilere bakarak şu yapıda bir Türkçe rapor yaz (sade metin, markdown yok):
 
-📊 *TEFAS FONLARI - GÜNÜN ÖNE ÇIKANLARI*
+📊 TEFAS FONLARI - GÜNÜN ÖNE ÇIKANLARI
 
 [2-3 satırda günün TEFAS özeti]
 
-🛡️ *Muhafazakâr için:* [1-2 satır öneri]
-⚖️ *Dengeli için:* [1-2 satır öneri]
-🚀 *Agresif için:* [1-2 satır öneri]
+🛡️ Muhafazakâr için: [1-2 satır öneri]
+⚖️ Dengeli için: [1-2 satır öneri]
+🚀 Agresif için: [1-2 satır öneri]
 """
 
 
@@ -66,13 +68,13 @@ def build_serbest_fund_prompt(top_funds: list[FundData]) -> str:
 {funds_text}
 
 Bu fonlar yüksek minimum yatırım gerektirir (genelde 1M TL+ portföy).
-Kısa bir Türkçe değerlendirme yaz:
+Kısa bir Türkçe değerlendirme yaz (sade metin, markdown yok):
 
-💎 *SERBEST FONLAR*
+💎 SERBEST FONLAR
 
 [3-4 satırda özet ve dikkat çekici fonlar]
 
-⚠️ *Not:* Serbest fonlara yatırım için nitelikli yatırımcı statüsü gerekir.
+⚠️ Not: Serbest fonlara yatırım için nitelikli yatırımcı statüsü gerekir.
 """
 
 
@@ -87,9 +89,9 @@ def build_repo_section_prompt(repo_rates: list) -> str:
 
 {rates_text}
 
-Kısa bir Türkçe yorum yaz:
+Kısa bir Türkçe yorum yaz (sade metin, markdown yok):
 
-🔄 *REPO / TCMB FAİZİ*
+🔄 REPO / TCMB FAİZİ
 
 [2-3 satırda mevcut durum ve trend yorumu]
 [Risksiz getiri arayanlar için ne anlama geldiği]
@@ -110,9 +112,9 @@ def build_news_section_prompt(news_items: list) -> str:
 
 {news_text}
 
-Bu haberlerden piyasayı etkileyebilecek olanları seç ve Türkçe özetle:
+Bu haberlerden piyasayı etkileyebilecek olanları seç ve Türkçe özetle (sade metin, markdown yok):
 
-📰 *EKONOMİ HABERLERİ*
+📰 EKONOMİ HABERLERİ
 
 [En önemli 3-5 haberi madde madde özetle]
 [Piyasa etkisi konusunda kısa bir değerlendirme]
@@ -134,19 +136,19 @@ verileri toplandı:
 - Eurobond sayısı: {len(snapshot.eurobonds)}
 - Haber sayısı: {len(snapshot.news)}
 
-Tüm bu verileri değerlendirerek 3 profil için NİHAİ KARŞILAŞTIRMA ÖZETİ yaz:
+Tüm bu verileri değerlendirerek 3 profil için NİHAİ KARŞILAŞTIRMA ÖZETİ yaz (sade metin, markdown yok):
 
-🎯 *GÜNÜN ÖZETİ - 3 PROFİLLİ KARŞILAŞTIRMA*
+🎯 GÜNÜN ÖZETİ - 3 PROFİLLİ KARŞILAŞTIRMA
 
-🛡️ *MUHAFAZAKÂR PROFİL İÇİN*
+🛡️ MUHAFAZAKÂR PROFİL İÇİN
 [3-4 satır: bugün muhafazakâr yatırımcının ne yapması mantıklı]
 
-⚖️ *DENGELİ PROFİL İÇİN*
+⚖️ DENGELİ PROFİL İÇİN
 [3-4 satır: dengeli yatırımcı için günün önerisi]
 
-🚀 *AGRESİF PROFİL İÇİN*
+🚀 AGRESİF PROFİL İÇİN
 [3-4 satır: agresif yatırımcı için yüksek getiri fırsatları]
 
-⚠️ *Yasal Uyarı:* Bu rapor yatırım tavsiyesi değildir, bilgilendirme amaçlıdır.
+⚠️ Yasal Uyarı: Bu rapor yatırım tavsiyesi değildir, bilgilendirme amaçlıdır.
 Yatırım kararları kendi sorumluluğunuzdadır.
 """

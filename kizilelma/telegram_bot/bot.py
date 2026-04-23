@@ -7,7 +7,6 @@ import asyncio
 import logging
 
 from telegram import Bot
-from telegram.constants import ParseMode
 
 from kizilelma.ai_advisor.advisor import AdvisorReport
 from kizilelma.telegram_bot.formatters import split_into_messages
@@ -38,29 +37,18 @@ class TelegramSender:
         for i, message in enumerate(messages):
             success = False
             try:
+                # Sade metin (parse_mode yok) — Telegram MarkdownV2 escape
+                # sorunlarını tamamen baypas etmek için. Emoji ve satır sonları
+                # yeterli okunabilirlik sağlıyor.
                 await self._bot.send_message(
                     chat_id=self.chat_id,
                     text=message,
-                    parse_mode=ParseMode.MARKDOWN_V2,
                     disable_web_page_preview=True,
                 )
                 success = True
-                logger.info(f"Mesaj {i+1}/{len(messages)} gönderildi (markdown)")
+                logger.info(f"Mesaj {i+1}/{len(messages)} gönderildi")
             except Exception as exc:
-                logger.warning(
-                    f"Mesaj {i+1} markdown ile gönderilemedi: {exc}. Sade metin denenecek."
-                )
-                # Markdown parse hatası olabilir → sade metin olarak dene
-                try:
-                    await self._bot.send_message(
-                        chat_id=self.chat_id,
-                        text=message,
-                        disable_web_page_preview=True,
-                    )
-                    success = True
-                    logger.info(f"Mesaj {i+1} sade metin olarak gönderildi")
-                except Exception as exc2:
-                    logger.error(f"Mesaj {i+1} tamamen başarısız: {exc2}")
+                logger.error(f"Mesaj {i+1} gönderilemedi: {exc}")
 
             if success:
                 sent_count += 1

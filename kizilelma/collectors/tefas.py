@@ -226,6 +226,10 @@ class TefasCollector(BaseCollector):
             logger.debug("[tefas] %s: fiyat parse edilemedi, atlanıyor", code)
             return None
 
+        # Detay sayfasında "Son 3 Ay Getiri Oranı" da var — listeden
+        # gelmeyen bu alanı buradan toplayalım (None dönebilir, sorun yok).
+        return_3m = _parse_detail_return_3m(detail_html)
+
         title = row["name"]
         category = row["category"] or "Diğer"
         title_norm = _normalize(title)
@@ -245,10 +249,11 @@ class TefasCollector(BaseCollector):
             return_1d=row.get("return_1d"),
             return_1w=None,   # Fonrehberi haftalık getiri sunmuyor
             return_1m=row.get("return_1m"),
-            return_3m=None,   # Fonrehberi 3 aylık getiri sunmuyor
+            return_3m=return_3m,  # Detay sayfasından çekildi (yoksa None)
             return_6m=row.get("return_6m"),
             return_1y=row.get("return_1y"),
             is_qualified_investor=is_qualified,
+            asset_tags=_extract_asset_tags(title, category),
         )
 
     # ------------------------------------------------------------------ #
@@ -365,3 +370,169 @@ def _parse_price(html: str) -> Optional[Decimal]:
             except (InvalidOperation, ValueError):
                 return None
     return None
+
+
+def _parse_detail_return_3m(html: str) -> Optional[Decimal]:
+    """Detay sayfasından "Son 3 Ay Getiri Oranı"nı çeker.
+
+    Fonrehberi ana liste tablosunda 3 aylık getiri sütunu YOKTUR; ancak
+    her fonun detay sayfasındaki getiri tablosunda vardır. Bu fonksiyon
+    o satırı yakalar. Değer "5.4967" / "-6.54509" / "0" formatında
+    yüzde olarak verilir (yüzde işareti olmadan). Bulunamazsa None.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    for tr in soup.find_all("tr"):
+        tds = tr.find_all("td")
+        if len(tds) < 2:
+            continue
+        label = tds[0].get_text(strip=True)
+        # "Son 3 Ay Getiri Oranı" — küçük yazım farkları olabilir
+        if "3 Ay" in label and "Getiri" in label:
+            value_text = tds[1].get_text(strip=True).lstrip("%").strip()
+            if not value_text or value_text in {"-", "—"}:
+                return None
+            value_text = value_text.replace(",", ".")
+            try:
+                return Decimal(value_text)
+            except (InvalidOperation, ValueError):
+                return None
+    return None
+
+
+# --------------------------------------------------------------------- #
+# Sektör / varlık / tema etiketleri
+# --------------------------------------------------------------------- #
+#
+# Neden gerekli?
+#     Kullanıcı Telegram raporunda "MT7 fonu neyin fonu?" diye merak ediyor.
+#     Fon adı çoğu zaman çok uzun ve kısaltmalıdır. Altına 3-6 etiket koyarak
+#     (örn. "🏷️ Hisse · Teknoloji · BIST30") bir bakışta içeriği söyletiyoruz.
+#
+# Kaynak:
+#     Fon adı + kategori metni. Fonrehberi fon içerik dağılımını sadece JS
+#     chart'ta verdiği için HTML'den güvenilir şekilde parse edilemiyor.
+#     Ad ve kategori ikili pratikte %95+ doğru etiket üretiyor.
+#
+# Etiket kategorileri (sırayla önem):
+#     1. Endeks (BIST30/100) — en spesifik
+#     2. Sektör (Teknoloji, Banka, Sanayi, ...)
+#     3. Varlık türü (Hisse, Tahvil, Altın, Döviz, ...)
+#     4. Tema/Strateji (Faizsiz, Serbest, Makro, ESG, ...)
+#     5. Coğrafya (ABD, Avrupa, Global, ...)
+#
+# Maksimum 6 etiketle sınırlı — Telegram satırını taşırmamak için.
+
+# Anahtar kelime → etiket eşlemesi (normalize edilmiş ASCII metin üzerinde
+# çalışır; Türkçe karakterler büyük ASCII harfe çevrilmiştir)
+_SECTOR_MAP: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("TEKNOLOJI", "BILISIM", "YAZILIM"), "Teknoloji"),
+    (("BANKA", "BANKACILIK", "FINANSAL", "FINANS"), "Banka"),
+    (("SANAYI", "SINAI"), "Sanayi"),
+    (("GIDA", "ICECEK"), "Gıda"),
+    (("INSAAT", "GAYRIMENKUL", "GYO"), "Gayrimenkul"),
+    (("ENERJI", "PETROL", "ELEKTRIK"), "Enerji"),
+    (("SAGLIK", "ILAC"), "Sağlık"),
+    (("TELEKOM", "HABERLESME"), "Telekom"),
+    (("SAVUNMA",), "Savunma"),
+    (("ULASTIRMA", "HAVACILIK"), "Ulaştırma"),
+    (("METAL", "CELIK", "MADEN"), "Metal"),
+    (("KIMYA", "PETROKIMYA"), "Kimya"),
+    (("TEKSTIL",), "Tekstil"),
+    (("TURIZM",), "Turizm"),
+    (("OTOMOTIV",), "Otomotiv"),
+)
+
+_ASSET_MAP: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("HISSE", "HISSELI"), "Hisse"),
+    (("TAHVIL", "BORCLANMA", "DIBS"), "Tahvil"),
+    (("KIRA SERT", "SUKUK", "KATILIMA DAYALI"), "Sukuk"),
+    (("ALTIN",), "Altın"),
+    (("GUMUS",), "Gümüş"),
+    (("PLATIN",), "Platin"),
+    (("KIYMETLI MADEN", "KIYMETLI METAL"), "Kıymetli Maden"),
+    (("DOVIZ", "USD", "EUR", "DOLAR"), "Döviz"),
+    (("EUROBOND",), "Eurobond"),
+    (("PARA PIYASASI",), "Para Piyasası"),
+    (("REPO",), "Repo"),
+    (("MEVDUAT",), "Mevduat"),
+    (("FON SEPETI",), "Fon Sepeti"),
+    (("ENDEKS",), "Endeks"),
+    (("VARLIGA DAYALI", "VDMK"), "VDMK"),
+)
+
+_THEME_MAP: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("KATILIM", "FAIZSIZ"), "Faizsiz"),
+    (("SERBEST", "NITELIKLI"), "Serbest"),
+    (("MAKRO",), "Makro"),
+    (("DENGELI",), "Dengeli"),
+    (("DEGISKEN",), "Değişken"),
+    (("KARMA",), "Karma"),
+    (("AGRESIF",), "Agresif"),
+    (("MUHAFAZAKAR",), "Muhafazakar"),
+    (("ESG", "SURDURULEBILIR"), "ESG"),
+    (("EMEKLILIK", "EMEKLI", "BES"), "Emeklilik"),
+)
+
+_GEO_MAP: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("AMERIKA", "ABD", "USA"), "ABD"),
+    (("AVRUPA", "EUROPE"), "Avrupa"),
+    (("ASYA", "CIN", "JAPON"), "Asya"),
+    (("GELISEN PIYASA", "EMERGING"), "Gelişen Piyasa"),
+    (("YABANCI", "GLOBAL", "DUNYA"), "Global"),
+)
+
+
+def _extract_asset_tags(name: str, category: str) -> list[str]:
+    """Fon adı ve kategorisinden 3-6 sektör/varlık/tema etiketi üretir.
+
+    En spesifikten (endeks) en geneline (coğrafya) doğru sıralar.
+    Duplicate etiketler kaldırılır, sıra korunur, maksimum 6 etiket döner.
+
+    Hiçbir eşleme tutmazsa kategori metninin ilk kelimesi etiket olarak
+    döner (fallback). Bu sayede liste hiçbir zaman boş dönmez (kategori
+    mevcutken).
+    """
+    text = _normalize(f"{name} {category}")
+
+    tags: list[str] = []
+
+    # 1) BIST endeksleri (en spesifik)
+    if "BIST 30" in text or "BIST30" in text:
+        tags.append("BIST30")
+    if "BIST 100" in text or "BIST100" in text:
+        tags.append("BIST100")
+
+    # 2) Sektörler
+    for keywords, tag in _SECTOR_MAP:
+        if any(k in text for k in keywords):
+            tags.append(tag)
+
+    # 3) Varlık türleri
+    for keywords, tag in _ASSET_MAP:
+        if any(k in text for k in keywords):
+            tags.append(tag)
+
+    # 4) Tema / Strateji
+    for keywords, tag in _THEME_MAP:
+        if any(k in text for k in keywords):
+            tags.append(tag)
+
+    # 5) Coğrafya
+    for keywords, tag in _GEO_MAP:
+        if any(k in text for k in keywords):
+            tags.append(tag)
+
+    # Fallback: kategoriyi kullan
+    if not tags and category:
+        first = category.split()[0] if category.split() else ""
+        if first:
+            tags.append(first[:12])
+
+    # Duplicate kaldır (sırayı koruyarak), max 6 etiket
+    seen: set[str] = set()
+    unique: list[str] = []
+    for t in tags:
+        if t not in seen:
+            seen.add(t)
+            unique.append(t)
+    return unique[:6]

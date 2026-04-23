@@ -64,9 +64,10 @@ def format_funds_by_category(
 ) -> str:
     """Bir kategori için fon listesi.
 
-    Mobil için optimize: her fon 2 satır.
+    Mobil için optimize: her fon 3 satır (etiketi olanlar için).
       Satır 1: sıra. KOD — Fon adı
-      Satır 2: Fiyat | 1A | 3A | 6A | 1Y
+      Satır 2: Fiyat | 1G | 1A | 3A | 6A | 1Y
+      Satır 3: 🏷️ Etiket1 · Etiket2 · ... (varsa)
     """
     header = f"{emoji} {_tr_upper(category_name)} — EN İYİ {limit}"
 
@@ -79,11 +80,16 @@ def format_funds_by_category(
         lines.append(f"{i:>2}. {f.code} — {name}")
         lines.append(
             f"    Fiyat: {_fmt_price(f.price)} TL | "
+            f"1G: {_fmt_pct(f.return_1d)} | "
             f"1A: {_fmt_pct(f.return_1m)} | "
             f"3A: {_fmt_pct(f.return_3m)} | "
             f"6A: {_fmt_pct(f.return_6m)} | "
             f"1Y: {_fmt_pct(f.return_1y)}"
         )
+        # Etiket satırı (varsa)
+        if f.asset_tags:
+            tags_str = " · ".join(f.asset_tags)
+            lines.append(f"    🏷️ {tags_str}")
         lines.append("")  # Fonlar arası boşluk
 
     return "\n".join(lines).rstrip()

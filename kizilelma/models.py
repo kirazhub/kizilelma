@@ -26,6 +26,13 @@ class FundData(BaseModel):
     is_qualified_investor: bool = Field(
         False, description="Nitelikli yatırımcı (serbest) fonu mu?"
     )
+    asset_tags: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Fonun sektör/varlık/tema etiketleri. Fon adı ve kategorisinden "
+            "türetilir (örn. ['Hisse', 'Teknoloji', 'BIST30'])."
+        ),
+    )
 
 
 class BondData(BaseModel):

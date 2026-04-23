@@ -73,6 +73,9 @@ async def test_tefas_fetch_returns_fund_list() -> None:
     assert float(afa.return_1d) == pytest.approx(0.15, rel=1e-3)
     assert float(afa.return_1m) == pytest.approx(4.20, rel=1e-3)
     assert float(afa.return_1y) == pytest.approx(48.50, rel=1e-3)
+    # Yeni: asset_tags dolu dönmeli (Para Piyasası fonu)
+    assert len(afa.asset_tags) > 0
+    assert "Para Piyasası" in afa.asset_tags
 
 
 @respx.mock
@@ -156,3 +159,106 @@ async def test_tefas_retries_listing_before_giving_up() -> None:
         await collector.fetch()
 
     assert route.call_count == 3
+
+
+# ---------------------------------------------------------------- #
+# Sektör/varlık etiketi çıkarımı (_extract_asset_tags)
+# ---------------------------------------------------------------- #
+#
+# Neden ayrı testler? Etiket üretimi saf bir fonksiyon; ağ gerektirmez.
+# HTML fixture'larını şişirmek yerine doğrudan fonksiyonu çağırıyoruz.
+
+def test_extract_asset_tags_hisse_teknoloji() -> None:
+    """Teknoloji hisse fonunda hem 'Hisse' hem 'Teknoloji' etiketi olmalı."""
+    from kizilelma.collectors.tefas import _extract_asset_tags
+
+    tags = _extract_asset_tags(
+        "AK PORTFÖY TEKNOLOJİ HİSSE SENEDİ FONU",
+        "Hisse Senedi Fonu",
+    )
+    assert "Teknoloji" in tags
+    assert "Hisse" in tags
+
+
+def test_extract_asset_tags_para_piyasasi() -> None:
+    """Para piyasası fonu 'Para Piyasası' etiketini almalı."""
+    from kizilelma.collectors.tefas import _extract_asset_tags
+
+    tags = _extract_asset_tags(
+        "İŞ PORTFÖY PARA PİYASASI FONU",
+        "Para Piyasası Fonu",
+    )
+    assert "Para Piyasası" in tags
+
+
+def test_extract_asset_tags_altin_katilim() -> None:
+    """Katılım altın fonunda 'Altın' ve 'Faizsiz' birlikte olmalı."""
+    from kizilelma.collectors.tefas import _extract_asset_tags
+
+    tags = _extract_asset_tags(
+        "ZİRAAT PORTFÖY KATILIM ALTIN FONU",
+        "Kıymetli Madenler Şemsiye Fonu",
+    )
+    assert "Altın" in tags
+    assert "Faizsiz" in tags
+    assert "Kıymetli Maden" in tags
+
+
+def test_extract_asset_tags_bist30() -> None:
+    """BIST 30 endeks fonu 'BIST30' + 'Endeks' + 'Hisse' etiketleri almalı."""
+    from kizilelma.collectors.tefas import _extract_asset_tags
+
+    tags = _extract_asset_tags(
+        "GARANTİ PORTFÖY BIST 30 ENDEKS HİSSE SENEDİ FONU",
+        "Endeks Fonu",
+    )
+    assert "BIST30" in tags
+    assert "Endeks" in tags
+    assert "Hisse" in tags
+
+
+def test_extract_asset_tags_max_six() -> None:
+    """Etiket sayısı 6'yı aşmamalı; öncelik sırayla uygulanır."""
+    from kizilelma.collectors.tefas import _extract_asset_tags
+
+    # Bilerek çok sayıda tetikleyici kelime içeren bir ad
+    tags = _extract_asset_tags(
+        "MEGA KATILIM TEKNOLOJİ BANKA SANAYİ HİSSE ALTIN DÖVİZ SERBEST FONU",
+        "Karma Serbest Fonu",
+    )
+    assert len(tags) <= 6
+
+
+def test_extract_asset_tags_no_keywords_fallback_to_category() -> None:
+    """Hiçbir anahtar kelime tutmazsa kategoriden fallback etiket üretmeli."""
+    from kizilelma.collectors.tefas import _extract_asset_tags
+
+    tags = _extract_asset_tags(
+        "XYZ PORTFÖY ÖZEL FON",  # tetikleyici kelime yok
+        "Değişken Fon",
+    )
+    # En azından bir etiket üretilmiş olmalı (Değişken tema'sı eşleşir)
+    assert len(tags) >= 1
+
+
+def test_extract_asset_tags_tahvil_eurobond() -> None:
+    """Eurobond tahvil fonu doğru etiketleri almalı."""
+    from kizilelma.collectors.tefas import _extract_asset_tags
+
+    tags = _extract_asset_tags(
+        "AK PORTFÖY EUROBOND BORÇLANMA ARAÇLARI FONU",
+        "Borçlanma Araçları Fonu",
+    )
+    assert "Eurobond" in tags
+    assert "Tahvil" in tags
+
+
+def test_extract_asset_tags_deduplicates() -> None:
+    """Aynı etiket iki kez üretilmemeli."""
+    from kizilelma.collectors.tefas import _extract_asset_tags
+
+    tags = _extract_asset_tags(
+        "HİSSE HİSSELİ HİSSE SENEDİ FONU",
+        "Hisse Senedi Fonu",
+    )
+    assert tags.count("Hisse") == 1

@@ -1,24 +1,26 @@
-"""TEFAS (Türkiye Elektronik Fon Alım Satım Platformu) collector.
+"""TEFAS (yatırım fonları) collector — Fonrehberi kaynaklı.
 
-Bu collector, TEFAS'ın resmi JSON API'sine doğrudan bağlanır:
-``POST https://www.tefas.gov.tr/api/DB/BindHistoryInfo``
+Neden TEFAS resmi API'si kullanılmıyor?
+    TEFAS'ın ``https://www.tefas.gov.tr/api/DB/BindHistoryInfo`` endpoint'i
+    bir WAF (Web Application Firewall) tarafından korunur. GitHub Actions
+    runner'larının IP blokları "Request Rejected" ("support ID: ...") HTML
+    sayfasıyla bloklanır, çağrı hiç API'ye ulaşmaz. Lokal testlerde de
+    davranış tutarsızdır (bazen bloklanır, bazen geçer). Bu yüzden
+    bağımsız ve herkese açık bir ayna olan **fonrehberi.com** tercih edildi.
 
-Önceki sürüm ``tefas-crawler`` paketini (fundturkey.com.tr yansısını) kullanıyordu,
-fakat GitHub Actions runner'larının IP'leri yansı tarafından bot olarak
-algılanıp "Max attempt limit reached" hatasıyla bloklanıyordu. Resmi TEFAS
-endpoint'i, doğru tarayıcı benzeri header'lar ile hem lokal hem GitHub
-Actions'tan güvenilir şekilde çağrılabiliyor.
+Fonrehberi iki katmanlı yapıdadır:
+    1. Ana liste (``https://www.fonrehberi.com/``) — tüm yatırım fonlarının
+       tek tablosu: kod, ad (<a> içinde), kategori, günlük / 1A / 6A / 1Y
+       getirileri. Haftalık ve 3 aylık getiriler kaynakta YOKTUR (None).
+    2. Fon başına detay sayfası (``<CODE>-fonu-kazanci-nedir.html``) —
+       "Son Fon Fiyatı" satırından TL cinsinden birim pay fiyatı alınır.
 
-Koruma mekanizmaları:
-- Her istekte rastgele bir modern tarayıcı User-Agent'ı seçilir.
-- Ana sayfaya önce GET atılıp session cookie alınır (bazı WAF kuralları için).
-- İstek başarısız olursa 2-4 saniye rastgele gecikme ile yeniden denenir.
-- Hafta sonu / tatil günlerini atlamak için geriye doğru 7 iş günü denenir.
-
-Not: ``BindHistoryInfo`` endpoint'i tarihsel fiyat, tedavül pay sayısı,
-portföy büyüklüğü gibi alanları döner; ancak ``GETIRI1G``, ``GETIRI1H`` gibi
-getiri alanlarını döndürmez. Bu alanlar ileride farklı bir endpoint ile
-doldurulabilir; şimdilik ``None`` bırakılıyor (mevcut davranışla aynı).
+Toplama akışı:
+    - Ana liste tek seferde çekilir (retry'lı).
+    - Fon başına fiyat detay sayfaları paralel (asyncio.gather) ile çekilir.
+    - Tek bir fonun detay sayfası hata döndürürse o fon atlanır; diğerleri
+      gelmeye devam eder.
+    - Ana liste hiç gelmezse ``CollectorError`` fırlatılır.
 """
 from __future__ import annotations
 
@@ -26,10 +28,12 @@ import asyncio
 import datetime as dt
 import logging
 import random
+import re
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 import httpx
+from bs4 import BeautifulSoup
 
 from kizilelma.collectors.base import BaseCollector, CollectorError
 from kizilelma.models import FundData
@@ -37,13 +41,12 @@ from kizilelma.models import FundData
 logger = logging.getLogger(__name__)
 
 
-# TEFAS resmi endpoint'i — tarihsel fon bilgisi (fiyat, tedavül, portföy).
-TEFAS_API_URL = "https://www.tefas.gov.tr/api/DB/BindHistoryInfo"
-# Session cookie almak için ziyaret ettiğimiz ana sayfa.
-TEFAS_HOME_URL = "https://www.tefas.gov.tr/TarihselVeriler.aspx"
+# Fonrehberi uç noktaları.
+FONREHBERI_LIST_URL = "https://www.fonrehberi.com/"
+FONREHBERI_DETAIL_TEMPLATE = "https://www.fonrehberi.com/{code}-fonu-kazanci-nedir.html"
 
 
-# Rastgele User-Agent rotasyonu — tek bir sabit UA bot tespitini kolaylaştırır.
+# Rastgele User-Agent rotasyonu — tek sabit UA bot tespitini kolaylaştırır.
 _USER_AGENTS: tuple[str, ...] = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -57,53 +60,16 @@ _USER_AGENTS: tuple[str, ...] = (
 
 
 def _build_headers() -> dict[str, str]:
-    """TEFAS API için tarayıcı benzeri istek başlıkları üretir."""
+    """Fonrehberi için tarayıcı benzeri HTTP başlıkları üretir."""
     return {
         "User-Agent": random.choice(_USER_AGENTS),
-        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
-        "X-Requested-With": "XMLHttpRequest",
-        "Referer": TEFAS_HOME_URL,
-        "Origin": "https://www.tefas.gov.tr",
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     }
 
 
-# Fon adından basit kategori çıkarımı için anahtar kelimeler (öncelik sıralı).
-# Türkçe upper() sorunları (İ/I) yüzünden anahtarlar normalize (noktasız I/i -> I)
-# ve büyük harf olarak tutulur. Başlığı karşılaştırırken aynı normalizasyonu
-# ``_normalize`` ile uygularız.
-_CATEGORY_KEYWORDS: list[tuple[str, str]] = [
-    # Türkçe anahtarlar
-    ("PARA PIYASASI", "Para Piyasası Fonu"),
-    ("KISA VADELI BORCLANMA", "Kısa Vadeli Borçlanma Araçları Fonu"),
-    ("BORCLANMA ARACLARI", "Borçlanma Araçları Fonu"),
-    ("HISSE SENEDI", "Hisse Senedi Fonu"),
-    ("KATILIM", "Katılım Fonu"),
-    ("ALTIN", "Altın Fonu"),
-    ("KIYMETLI MADEN", "Kıymetli Madenler Fonu"),
-    ("FON SEPETI", "Fon Sepeti Fonu"),
-    ("DEGISKEN", "Değişken Fon"),
-    ("KARMA", "Karma Fon"),
-    ("ENDEKS", "Endeks Fonu"),
-    ("BYF", "Borsa Yatırım Fonu"),
-    # İngilizce karşılıkları (TEFAS'taki bazı fon adları İngilizce'dir)
-    ("MONEY MARKET", "Para Piyasası Fonu"),
-    ("SHORT TERM DEBT", "Kısa Vadeli Borçlanma Araçları Fonu"),
-    ("DEBT INSTRUMENT", "Borçlanma Araçları Fonu"),
-    ("EQUITY", "Hisse Senedi Fonu"),
-    ("STOCK FUND", "Hisse Senedi Fonu"),
-    ("PARTICIPATION", "Katılım Fonu"),
-    ("GOLD", "Altın Fonu"),
-    ("PRECIOUS METAL", "Kıymetli Madenler Fonu"),
-    ("FUND OF FUND", "Fon Sepeti Fonu"),
-    ("MULTI-ASSET", "Değişken Fon"),
-    ("VARIABLE", "Değişken Fon"),
-    ("MIXED", "Karma Fon"),
-    ("INDEX FUND", "Endeks Fonu"),
-]
-
-
+# Türkçe karakterleri ASCII büyük harfe çeviren tablo — is_qualified_investor
+# karşılaştırmasında Türkçe upper() bug'ına düşmemek için.
 _TR_UPPER_MAP = str.maketrans(
     {
         "ç": "C", "Ç": "C",
@@ -117,108 +83,96 @@ _TR_UPPER_MAP = str.maketrans(
 
 
 def _normalize(text: str) -> str:
-    """Türkçe harfleri ASCII karşılıklarına çevirip büyük harfe getirir."""
+    """Türkçe harfleri ASCII'ye çevirip büyük harfe getirir."""
     return text.translate(_TR_UPPER_MAP).upper()
 
 
 class TefasCollector(BaseCollector):
-    """TEFAS fonlarının günlük verilerini çeker (resmi API + retry)."""
+    """Yatırım fonu verilerini ``fonrehberi.com``'dan çeker."""
 
     name = "tefas"
 
     def __init__(
         self,
         timeout: float = 60.0,
-        max_lookback_days: int = 7,
         max_retries: int = 3,
         retry_delay_range: tuple[float, float] = (2.0, 4.0),
+        max_funds: Optional[int] = None,
+        detail_concurrency: int = 16,
         client_factory: Optional[Any] = None,
     ) -> None:
         """
         Args:
             timeout: HTTP istek zaman aşımı (saniye).
-            max_lookback_days: Bugünden geriye doğru en fazla kaç gün veri
-                aranacak. TEFAS yalnızca iş günü verisi yayınladığından hafta
-                sonu ve tatil günlerinde birkaç gün geri gitmemiz gerekir.
-            max_retries: Tek bir gün için kaç kez tekrar denenecek.
+            max_retries: Ana listenin çekilmesi için kaç kez tekrar denenecek.
             retry_delay_range: Denemeler arası rastgele gecikme aralığı (saniye).
+            max_funds: Varsayılan None → listedeki tüm fonlar. Bir üst sınır
+                verilirse (örn. 50) sadece tablonun ilk N fonu çekilir.
+            detail_concurrency: Eşzamanlı detay sayfası isteği sayısı
+                (semafor limiti). Fonrehberi'ni boğmamak için makul tutulur.
             client_factory: Test için httpx.AsyncClient üretici callable.
                 None verilirse gerçek ``httpx.AsyncClient`` kullanılır.
         """
         self.timeout = timeout
-        self.max_lookback_days = max_lookback_days
         self.max_retries = max_retries
         self.retry_delay_range = retry_delay_range
+        self.max_funds = max_funds
+        self.detail_concurrency = max(1, int(detail_concurrency))
         self._client_factory = client_factory
 
+    # ------------------------------------------------------------------ #
+    # Genel akış
+    # ------------------------------------------------------------------ #
     async def fetch(self) -> list[FundData]:
-        """Bugüne en yakın iş gününe ait tüm fonların verisini döndürür."""
-        today = dt.date.today()
-        last_error: Optional[Exception] = None
-
-        for days_back in range(0, self.max_lookback_days + 1):
-            candidate = today - dt.timedelta(days=days_back)
-            if candidate.weekday() >= 5:  # Cumartesi/Pazar
-                continue
-
-            try:
-                funds = await self._fetch_for_date(candidate)
-            except Exception as exc:
-                logger.warning(
-                    "[tefas] %s için veri çekilemedi: %s",
-                    candidate.isoformat(),
-                    exc,
+        """Tüm fon listesini ve birim fiyatlarını döndürür."""
+        async with self._make_client() as client:
+            # 1) Ana listeyi çek (retry'lı)
+            list_html = await self._fetch_listing(client)
+            rows = _parse_listing(list_html)
+            if not rows:
+                raise CollectorError(
+                    self.name,
+                    "Fonrehberi ana listesi boş döndü — HTML yapısı değişmiş olabilir.",
                 )
-                last_error = exc
-                continue
+
+            if self.max_funds is not None:
+                rows = rows[: self.max_funds]
+            logger.info("[tefas] Fonrehberi listesinde %d fon bulundu", len(rows))
+
+            # 2) Her fonun fiyatını paralel çek
+            today = dt.date.today()
+            sem = asyncio.Semaphore(self.detail_concurrency)
+            tasks = [self._fetch_fund(client, row, today, sem) for row in rows]
+            results = await asyncio.gather(*tasks, return_exceptions=False)
+
+            funds = [f for f in results if f is not None]
+            skipped = len(results) - len(funds)
+            if skipped:
+                logger.info(
+                    "[tefas] %d fon fiyat/veri eksikliği nedeniyle atlandı",
+                    skipped,
+                )
 
             if not funds:
-                logger.info(
-                    "[tefas] %s günü için veri yok, bir önceki iş gününü deniyorum",
-                    candidate.isoformat(),
+                raise CollectorError(
+                    self.name,
+                    "Hiçbir fonun fiyatı çekilemedi — Fonrehberi erişilemez olabilir.",
                 )
-                continue
 
-            logger.info(
-                "[tefas] %s için %d fon kaydı alındı",
-                candidate.isoformat(),
-                len(funds),
-            )
+            logger.info("[tefas] Toplam %d fon kaydı alındı", len(funds))
             return funds
 
-        if last_error is not None:
-            raise CollectorError(
-                self.name,
-                f"Son {self.max_lookback_days} iş gününde veri çekilemedi: "
-                f"{last_error}",
-            )
-        raise CollectorError(
-            self.name,
-            f"Son {self.max_lookback_days} iş gününde TEFAS boş döndü",
-        )
-
     # ------------------------------------------------------------------ #
-    # Tek bir gün için retry'lı API çağrısı
+    # Ana liste (retry'lı)
     # ------------------------------------------------------------------ #
-    async def _fetch_for_date(self, target: dt.date) -> list[FundData]:
-        """Belirli bir gün için TEFAS API'sinden veri çeker (retry ile)."""
-        payload = {
-            "fontip": "YAT",
-            "sfontur": "",
-            "fonkod": "",
-            "fongrup": "",
-            "bastarih": target.strftime("%d.%m.%Y"),
-            "bittarih": target.strftime("%d.%m.%Y"),
-            "fonturkod": "",
-            "fonunvantip": "",
-            "strperiod": "1,1,1,1,1,1,1",
-            "islemdurum": "1",
-        }
-
+    async def _fetch_listing(self, client: httpx.AsyncClient) -> str:
+        """Fonrehberi ana sayfasını (fon listesi) retry'lı şekilde getirir."""
         last_error: Optional[Exception] = None
         for attempt in range(1, self.max_retries + 1):
             try:
-                data = await self._request(payload)
+                response = await client.get(FONREHBERI_LIST_URL)
+                response.raise_for_status()
+                return response.text
             except Exception as exc:
                 last_error = exc
                 if attempt >= self.max_retries:
@@ -226,64 +180,80 @@ class TefasCollector(BaseCollector):
                 low, high = self.retry_delay_range
                 delay = random.uniform(low, high)
                 logger.warning(
-                    "[tefas] %s deneme %d/%d başarısız (%s), %.1fs sonra tekrar",
-                    target.isoformat(),
-                    attempt,
-                    self.max_retries,
-                    exc,
-                    delay,
+                    "[tefas] ana liste deneme %d/%d başarısız (%s), %.1fs sonra tekrar",
+                    attempt, self.max_retries, exc, delay,
                 )
                 await asyncio.sleep(delay)
-                continue
-
-            rows = data.get("data") or []
-            if not rows:
-                # API geçerli ama veri boş — geriye düşsün.
-                return []
-
-            funds: list[FundData] = []
-            skipped = 0
-            for item in rows:
-                fund = self._row_to_fund(item)
-                if fund is None:
-                    skipped += 1
-                    continue
-                funds.append(fund)
-            if skipped:
-                logger.info(
-                    "[tefas] %d fon geçersiz fiyat/veri nedeniyle atlandı",
-                    skipped,
-                )
-            return funds
 
         raise CollectorError(
             self.name,
-            f"{target.isoformat()} için {self.max_retries} deneme başarısız: "
-            f"{last_error}",
+            f"Ana liste {self.max_retries} denemenin ardından çekilemedi: {last_error}",
         )
 
-    async def _request(self, payload: dict[str, str]) -> dict[str, Any]:
-        """TEFAS API'sine tek bir POST isteği atar, JSON döner."""
-        async with self._make_client() as client:
-            # Bazı WAF kuralları önce ana sayfanın ziyaret edilmesini bekler.
-            # Cookie kritik olmasa bile bu istek "gerçek tarayıcı" sinyali verir.
-            try:
-                await client.get(TEFAS_HOME_URL)
-            except Exception as exc:  # pragma: no cover - cookie kritik değil
-                logger.debug("[tefas] ana sayfa isinmadi: %s", exc)
+    # ------------------------------------------------------------------ #
+    # Tek bir fonun detayı
+    # ------------------------------------------------------------------ #
+    async def _fetch_fund(
+        self,
+        client: httpx.AsyncClient,
+        row: dict[str, Any],
+        fund_date: dt.date,
+        sem: asyncio.Semaphore,
+    ) -> Optional[FundData]:
+        """Ana listedeki bir satır için fiyatı çekip ``FundData``'ya dönüştürür.
 
-            response = await client.post(TEFAS_API_URL, data=payload)
-            response.raise_for_status()
-            try:
-                return response.json()
-            except ValueError as exc:
-                # WAF HTML hata sayfası döndürdüyse JSON parse başarısız olur.
-                preview = response.text[:200].replace("\n", " ")
-                raise CollectorError(
-                    self.name,
-                    f"JSON çözümlenemedi, cevabın başı: {preview!r}",
-                ) from exc
+        Hata durumunda ``None`` döner (tek fonun kırılması toplamayı bozmasın).
+        """
+        code = row["code"]
+        url = FONREHBERI_DETAIL_TEMPLATE.format(code=code)
 
+        async with sem:
+            try:
+                response = await client.get(url)
+                if response.status_code != 200:
+                    logger.debug(
+                        "[tefas] %s detay sayfası HTTP %d, atlanıyor",
+                        code, response.status_code,
+                    )
+                    return None
+                detail_html = response.text
+            except Exception as exc:
+                logger.debug("[tefas] %s detay sayfası hata: %s", code, exc)
+                return None
+
+        price = _parse_price(detail_html)
+        if price is None or price <= 0:
+            logger.debug("[tefas] %s: fiyat parse edilemedi, atlanıyor", code)
+            return None
+
+        title = row["name"]
+        category = row["category"] or "Diğer"
+        title_norm = _normalize(title)
+        category_norm = _normalize(category)
+        is_qualified = (
+            "SERBEST" in title_norm
+            or "NITELIKLI" in title_norm
+            or "SERBEST" in category_norm
+        )
+
+        return FundData(
+            code=code,
+            name=title,
+            category=category,
+            price=price,
+            date=fund_date,
+            return_1d=row.get("return_1d"),
+            return_1w=None,   # Fonrehberi haftalık getiri sunmuyor
+            return_1m=row.get("return_1m"),
+            return_3m=None,   # Fonrehberi 3 aylık getiri sunmuyor
+            return_6m=row.get("return_6m"),
+            return_1y=row.get("return_1y"),
+            is_qualified_investor=is_qualified,
+        )
+
+    # ------------------------------------------------------------------ #
+    # httpx client fabrikası
+    # ------------------------------------------------------------------ #
     def _make_client(self) -> httpx.AsyncClient:
         """httpx.AsyncClient üretir (test için override edilebilir)."""
         if self._client_factory is not None:
@@ -294,119 +264,104 @@ class TefasCollector(BaseCollector):
             follow_redirects=True,
         )
 
-    # ------------------------------------------------------------------ #
-    # Satır dönüştürme
-    # ------------------------------------------------------------------ #
-    @classmethod
-    def _row_to_fund(cls, row: dict[str, Any]) -> Optional[FundData]:
-        """Tek bir TEFAS JSON kaydını ``FundData``'ya dönüştürür.
-
-        TEFAS bazen kapalı veya yeni kurulan fonlar için ``FIYAT=0`` döner;
-        bu satırlar sessizce atlanır (``None`` döndürülür). Tek bir bozuk satır
-        tüm toplama işini kırmamalıdır.
-        """
-        code = str(row.get("FONKODU", "")).strip()
-        title = str(row.get("FONUNVAN", "")).strip()
-        if not code or not title:
-            logger.debug("[tefas] eksik kod/ad, satır atlanıyor: %r", row)
-            return None
-
-        price_raw = row.get("FIYAT")
-        try:
-            price = Decimal(str(price_raw))
-        except (InvalidOperation, ValueError, TypeError):
-            logger.debug("[tefas] %s: fiyat parse edilemedi (%r)", code, price_raw)
-            return None
-        if price <= 0:
-            logger.debug("[tefas] %s: fiyat 0 veya negatif, atlanıyor", code)
-            return None
-
-        try:
-            date = _coerce_date(row.get("TARIH"))
-        except CollectorError:
-            logger.debug("[tefas] %s: tarih parse edilemedi (%r)", code, row.get("TARIH"))
-            return None
-
-        title_norm = _normalize(title)
-        is_qualified = "SERBEST" in title_norm or "NITELIKLI" in title_norm
-
-        # Bazı TEFAS yanıtlarında "FONTUR" / "FONTURACIKLAMA" bulunur; varsa
-        # onu tercih et, yoksa addan çıkar.
-        category_raw = row.get("FONTURACIKLAMA") or row.get("FONTUR")
-        if category_raw:
-            category = str(category_raw).strip()
-            if is_qualified and "SERBEST" not in _normalize(category):
-                category = f"{category} (Serbest)"
-        else:
-            category = _infer_category(title_norm, is_qualified)
-
-        return FundData(
-            code=code,
-            name=title,
-            category=category,
-            price=price,
-            date=date,
-            return_1d=None,
-            return_1w=None,
-            return_1m=None,
-            return_3m=None,
-            return_6m=None,
-            return_1y=None,
-            is_qualified_investor=is_qualified,
-        )
-
 
 # ---------------------------------------------------------------------- #
-# Yardımcı saf fonksiyonlar
+# Saf parse fonksiyonları (test edilebilir, I/O'suz)
 # ---------------------------------------------------------------------- #
-def _coerce_date(value: Any) -> dt.date:
-    """Çeşitli tarih temsillerini ``datetime.date``'e dönüştürür.
+def _parse_percent(text: str) -> Optional[Decimal]:
+    """'%5.4967' veya '%-6.54509' gibi yüzde stringlerini Decimal'e çevirir.
 
-    TEFAS resmi API'si tarihi milisaniye cinsinden Unix timestamp string'i
-    olarak döndürür (örn. ``"1776816000000"``). Eski tefas-crawler ise
-    ``"YYYY-MM-DD"`` / ``"dd.MM.yyyy"`` döndürebilir. Her üçünü de destekliyoruz.
+    Boş/tanımsız değerlerde None döner. '%0' da Decimal(0) döner (anlamlıdır).
     """
-    if value is None:
-        raise CollectorError("tefas", "Tarih alanı boş")
-    if isinstance(value, dt.datetime):
-        return value.date()
-    if isinstance(value, dt.date):
-        return value
-    if isinstance(value, (int, float)):
-        try:
-            return dt.datetime.fromtimestamp(
-                float(value) / 1000, tz=dt.timezone.utc
-            ).date()
-        except (OverflowError, OSError, ValueError) as exc:
-            raise CollectorError(
-                "tefas", f"Tarih timestamp'i çözümlenemedi: {value!r}"
-            ) from exc
-    if isinstance(value, str):
-        stripped = value.strip()
-        # 1) Sayısal timestamp (milisaniye) — TEFAS resmi API formatı
-        if stripped.isdigit() or (stripped.startswith("-") and stripped[1:].isdigit()):
-            try:
-                return dt.datetime.fromtimestamp(
-                    int(stripped) / 1000, tz=dt.timezone.utc
-                ).date()
-            except (OverflowError, OSError, ValueError) as exc:
-                raise CollectorError(
-                    "tefas", f"Tarih timestamp'i çözümlenemedi: {value!r}"
-                ) from exc
-        # 2) ISO / Türkçe nokta formatı
-        for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
-            try:
-                return dt.datetime.strptime(stripped, fmt).date()
-            except ValueError:
-                continue
-    raise CollectorError("tefas", f"Tanınmayan tarih formatı: {value!r}")
+    if text is None:
+        return None
+    cleaned = text.strip().lstrip("%").strip()
+    if not cleaned or cleaned in {"-", "—"}:
+        return None
+    # Türkçe ondalık virgülü de olabilir — nokta'ya çevir
+    cleaned = cleaned.replace(",", ".")
+    try:
+        return Decimal(cleaned)
+    except (InvalidOperation, ValueError):
+        return None
 
 
-def _infer_category(title_norm: str, is_qualified: bool) -> str:
-    """Fon adından (normalize edilmiş başlıktan) kaba bir kategori çıkarır."""
-    for keyword, category in _CATEGORY_KEYWORDS:
-        if keyword in title_norm:
-            if is_qualified and "SERBEST" not in _normalize(category):
-                return f"{category} (Serbest)"
-            return category
-    return "Serbest Fon" if is_qualified else "Diğer"
+def _parse_listing(html: str) -> list[dict[str, Any]]:
+    """Fonrehberi ana liste HTML'inden fon satırlarını çıkarır.
+
+    Her satır şu anahtarları içeren bir dict'tir::
+        code, name, category, return_1d, return_1m, return_6m, return_1y
+
+    Yapısı bozuk satırlar atlanır; liste boş dönebilir (o zaman çağıran
+    uyarır).
+    """
+    soup = BeautifulSoup(html, "lxml")
+    # Birden fazla tablo varsa "Fon Kodu" başlığı olanı seçelim.
+    target_table = None
+    for table in soup.find_all("table"):
+        headers = [th.get_text(strip=True) for th in table.find_all("th")]
+        if any("Fon Kodu" in h for h in headers):
+            target_table = table
+            break
+    if target_table is None:
+        logger.warning("[tefas] Fonrehberi ana tablosu bulunamadı")
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for tr in target_table.find_all("tr"):
+        tds = tr.find_all("td")
+        if len(tds) < 7:
+            continue  # başlık / footer / bozuk satır
+        code = tds[0].get_text(strip=True)
+        if not code or not re.fullmatch(r"[A-Z0-9]{2,8}", code):
+            continue
+        name_cell = tds[1]
+        # Ad genelde <a> içindedir ama doğrudan metin de olabilir
+        anchor = name_cell.find("a")
+        name = anchor.get_text(strip=True) if anchor else name_cell.get_text(strip=True)
+        if not name:
+            continue
+        category = tds[2].get_text(strip=True)
+        rows.append(
+            {
+                "code": code,
+                "name": name,
+                "category": category,
+                "return_1d": _parse_percent(tds[3].get_text(strip=True)),
+                "return_1m": _parse_percent(tds[4].get_text(strip=True)),
+                "return_6m": _parse_percent(tds[5].get_text(strip=True)),
+                "return_1y": _parse_percent(tds[6].get_text(strip=True)),
+            }
+        )
+    return rows
+
+
+# "1.234567 TL" veya "1.234,56 TL" gibi değerler için regex.
+_PRICE_RE = re.compile(r"([\d.,]+)\s*(?:TL|₺)", re.IGNORECASE)
+
+
+def _parse_price(html: str) -> Optional[Decimal]:
+    """Fon detay sayfasından "Son Fon Fiyatı" değerini çeker."""
+    soup = BeautifulSoup(html, "lxml")
+    # "Son Fon Fiyatı" etiketinin yan hücresini bul
+    for tr in soup.find_all("tr"):
+        tds = tr.find_all("td")
+        if len(tds) < 2:
+            continue
+        label = tds[0].get_text(strip=True)
+        if "Son Fon Fiyat" in label:
+            value_text = tds[1].get_text(strip=True)
+            m = _PRICE_RE.search(value_text)
+            if not m:
+                return None
+            raw = m.group(1)
+            # Türkçe formatı: "1.234,56" → 1234.56
+            if "," in raw and "." in raw:
+                raw = raw.replace(".", "").replace(",", ".")
+            elif "," in raw:
+                raw = raw.replace(",", ".")
+            try:
+                return Decimal(raw)
+            except (InvalidOperation, ValueError):
+                return None
+    return None

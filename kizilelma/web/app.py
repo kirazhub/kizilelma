@@ -384,18 +384,23 @@ async def ai_commentary():
 
 
 def main() -> None:
-    """CLI giriş noktası — uvicorn sunucusunu başlatır."""
+    """CLI giriş noktası — uvicorn sunucusunu başlatır.
+
+    Railway ve benzeri PaaS ortamlarında `$PORT` env değişkeni verilir;
+    lokal kullanımda 8000 default'u devreye girer.
+    """
     import uvicorn
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    port = int(os.environ.get("PORT", 8000))
     print("=" * 60)
     print("  KIZILELMA TERMINAL")
-    print("  http://localhost:8000")
+    print(f"  http://0.0.0.0:{port}")
     print("=" * 60)
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 
 if __name__ == "__main__":

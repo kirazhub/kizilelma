@@ -1,0 +1,9 @@
+[phases.setup]
+aptPkgs = ['...']
+nixPkgs = ['python311', 'gcc']
+
+[phases.install]
+cmds = ['pip install -e .']
+
+[start]
+cmd = 'kizilelma-web'

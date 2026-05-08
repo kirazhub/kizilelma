@@ -35,6 +35,12 @@ Bloomberg Terminal tarzı bir web arayüzü gelir:
 - **Veritabanı:** SQLite (geçmiş raporlar arşivi)
 - **Zamanlama:** GitHub Actions (cron) veya APScheduler (lokal)
 
+## Deploy
+
+Web arayüzünü internete açmak için: [Railway Deploy Rehberi](docs/railway-deploy.md)
+
+Kendi domain'ini bağlamak ve 7/24 çalışmak için Railway'de deploy etmen yeterli.
+
 ## Yasal Uyarı
 
 Bu yazılım yatırım tavsiyesi DEĞİLDİR. Bilgilendirme amaçlıdır. Yatırım kararları kullanıcının kendi sorumluluğundadır.

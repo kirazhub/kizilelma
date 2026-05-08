@@ -157,3 +157,105 @@ def _to_float(value) -> Optional[float]:
     if value is None:
         return None
     return float(value)
+
+
+def get_latest_full_snapshot(engine=None) -> Optional[dict]:
+    """En son başarılı snapshot'ı tüm verileriyle döndür.
+
+    DB'deki SnapshotRecord + ilgili FundRecord / RepoRecord'ları birleştirip
+    canlı `MarketSnapshot.model_dump()` ile aynı şemada bir dict üretir.
+
+    Web arayüzünün fallback (yedek) mekanizması bu fonksiyonu kullanır:
+    canlı veri çekilemediğinde en son kaydedilen veriyi gösterip kullanıcıyı
+    boş ekranla karşılaşmaktan korur.
+
+    Args:
+        engine: Test için özel engine (opsiyonel)
+
+    Returns:
+        En son snapshot'ın dict hali; DB boşsa None.
+        Dict içinde `is_historical=True` bayrağı bulunur.
+    """
+    engine = engine or get_engine()
+    with Session(engine) as session:
+        # En son DOLU snapshot — boş kayıtlar (fund_count=0 & repo_count=0)
+        # atlanır. Böylece bugün canlı çekim başarısız olsa bile kullanıcı,
+        # en son başarılı günün verisini görür.
+        stmt = (
+            select(SnapshotRecord)
+            .where(
+                (SnapshotRecord.fund_count > 0)
+                | (SnapshotRecord.repo_count > 0)
+            )
+            .order_by(SnapshotRecord.timestamp.desc())
+            .limit(1)
+        )
+        snap = session.exec(stmt).first()
+
+        # Eğer dolu kayıt yoksa en sonuncuya düş (yine de boş olabilir ama
+        # en azından timestamp bilgisi verilir)
+        if snap is None:
+            stmt = (
+                select(SnapshotRecord)
+                .order_by(SnapshotRecord.timestamp.desc())
+                .limit(1)
+            )
+            snap = session.exec(stmt).first()
+
+        if snap is None:
+            return None
+
+        # Bu snapshot'ın fonları
+        fund_stmt = select(FundRecord).where(FundRecord.snapshot_id == snap.id)
+        fund_records = list(session.exec(fund_stmt))
+
+        # Repo oranları
+        repo_stmt = select(RepoRecord).where(RepoRecord.snapshot_id == snap.id)
+        repo_records = list(session.exec(repo_stmt))
+
+        # errors JSON parse et — bozuksa boş dict
+        try:
+            errors = json.loads(snap.errors_json) if snap.errors_json else {}
+        except (ValueError, TypeError):
+            errors = {}
+
+        # MarketSnapshot.model_dump() ile aynı şema
+        return {
+            "timestamp": snap.timestamp.isoformat(),
+            "snapshot_id": snap.id,
+            "is_historical": True,  # UI bu bayrağa göre "ARŞİV" etiketi gösterir
+            "funds": [
+                {
+                    "code": f.code,
+                    "name": f.name,
+                    "category": f.category,
+                    "price": str(f.price),
+                    "date": f.date.isoformat(),
+                    "return_1d": str(f.return_1d) if f.return_1d is not None else None,
+                    "return_1w": str(f.return_1w) if f.return_1w is not None else None,
+                    "return_1m": str(f.return_1m) if f.return_1m is not None else None,
+                    "return_3m": str(f.return_3m) if f.return_3m is not None else None,
+                    "return_6m": str(f.return_6m) if f.return_6m is not None else None,
+                    "return_1y": str(f.return_1y) if f.return_1y is not None else None,
+                    "is_qualified_investor": f.is_qualified_investor,
+                    "asset_tags": [],  # Eski DB kayıtlarında bu alan yok, boş dön
+                }
+                for f in fund_records
+            ],
+            "repo_rates": [
+                {
+                    "type": r.type,
+                    "maturity": r.maturity,
+                    "rate": str(r.rate),
+                    "date": r.date.isoformat(),
+                }
+                for r in repo_records
+            ],
+            # Bonds/sukuks/eurobonds/news şu an ayrı tabloda tutulmuyor
+            # (sadece sayıları saklanıyor). v2'de tablo eklenirse doldurulur.
+            "bonds": [],
+            "sukuks": [],
+            "eurobonds": [],
+            "news": [],
+            "errors": errors,
+        }

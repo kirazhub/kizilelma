@@ -3,14 +3,20 @@
 API uç noktaları:
     - GET /                : Ana HTML sayfası (terminal arayüzü)
     - GET /api/status      : Sağlık kontrolü + canlı saat
-    - GET /api/snapshot    : Güncel piyasa verisi (cache'lenir)
+    - GET /api/snapshot    : Güncel piyasa verisi (cache'lenir + DB fallback)
     - GET /api/history     : Son 30 snapshot kaydı (DB'den)
 
-Cache stratejisi:
-    Snapshot çağrısı TEFAS yüzünden 30-60 saniye sürebilir.
-    Bu yüzden sonuç 5 dakika boyunca bellekte tutulur; aynı istek
-    tekrar gelirse cache'den döndürülür. İlk çağrı yavaş,
-    sonrakiler anlıktır.
+Cache & fallback stratejisi:
+    Kullanıcı ASLA boş ekran görmemeli. Üç katmanlı akış:
+
+    1. Taze cache (< 5 dk)     → cache'den dön (`source=live` veya `source=db`)
+    2. Canlı toplama (collect) → başarılıysa cache'le ve dön (`source=live`)
+    3. DB fallback             → canlı patladıysa en son DB kaydını dön
+                                 (`source=db`, `is_historical=true`)
+    4. DB de boşsa             → 503 error
+
+    Böylece hafta sonu / TEFAS bakım / internet kesintisi durumlarında bile
+    en son kalan veri ekranda kalır; üstte "DATA AS OF: …" uyarısı çıkar.
 """
 import asyncio
 import datetime as dt
@@ -30,15 +36,24 @@ CACHE_TTL_SECONDS = 5 * 60  # 5 dakika
 
 
 class SnapshotCache:
-    """Basit bellekteki snapshot cache'i.
+    """Bellekteki snapshot cache'i + DB fallback yöneticisi.
 
-    Aynı anda birden fazla istek gelirse tek bir toplama işlemi
-    beklenir — böylece TEFAS'a aynı anda 10 kere istek atmış olmayız.
+    Aynı anda birden fazla istek gelirse tek bir toplama işlemi beklenir —
+    böylece TEFAS'a aynı anda 10 kere istek atmış olmayız.
+
+    Canlı toplama başarısız olursa otomatik olarak DB'deki en son snapshot'a
+    düşer; o da yoksa hatayı yukarı atar.
+
+    İç durum alanları (testlerin eriştiği):
+        _data        : cache'deki dict (ham snapshot verisi)
+        _fetched_at  : cache'in alındığı zaman
+        _source      : "live" | "db" — verinin nereden geldiği
     """
 
     def __init__(self, ttl_seconds: int = CACHE_TTL_SECONDS) -> None:
         self._data: Optional[dict] = None
         self._fetched_at: Optional[dt.datetime] = None
+        self._source: Optional[str] = None  # "live" | "db"
         self._ttl = ttl_seconds
         self._lock = asyncio.Lock()
 
@@ -49,29 +64,78 @@ class SnapshotCache:
         return age < self._ttl
 
     async def get_or_fetch(self) -> dict:
-        """Cache taze ise onu döndür, değilse yenile."""
+        """Cache taze ise onu döndür; değilse canlı çek, o da başarısızsa DB'ye düş.
+
+        Returns:
+            `{"data": <snapshot_dict>, "cached": bool, "fetched_at": iso,
+              "source": "live"|"db", "live_error": str|None}` yapısı.
+
+        Raises:
+            Exception: Hem canlı toplama hem DB fallback başarısızsa.
+        """
         if self.is_fresh():
-            return self._wrap(self._data, cached=True)
+            return self._wrap(self._data, cached=True, live_error=None)
 
         async with self._lock:
             # Başkası doldurmuş olabilir
             if self.is_fresh():
-                return self._wrap(self._data, cached=True)
+                return self._wrap(self._data, cached=True, live_error=None)
 
             # Import burada — circular import'tan kaçınmak için
             from kizilelma.scheduler.daily_job import collect_all_data
 
-            logger.info("Snapshot cache yenileniyor…")
-            snapshot = await collect_all_data()
-            self._data = snapshot.model_dump(mode="json")
-            self._fetched_at = dt.datetime.now()
-            return self._wrap(self._data, cached=False)
+            # Katman 1: Canlı veri toplamayı dene
+            try:
+                logger.info("Snapshot cache yenileniyor (canlı)…")
+                snapshot = await collect_all_data()
+                data = snapshot.model_dump(mode="json")
+                data["is_historical"] = False
+                self._data = data
+                self._fetched_at = dt.datetime.now()
+                self._source = "live"
+                return self._wrap(self._data, cached=False, live_error=None)
+            except Exception as exc:
+                live_error = str(exc)[:200]
+                logger.warning(
+                    "Canlı veri çekilemedi, DB fallback deneniyor: %s", exc
+                )
 
-    def _wrap(self, data: dict, cached: bool) -> dict:
+                # Katman 2: DB fallback — en son başarılı snapshot'ı getir
+                try:
+                    from kizilelma.storage.db import get_latest_full_snapshot
+
+                    historical = get_latest_full_snapshot()
+                except Exception as db_exc:
+                    # DB de patladıysa canlı hatasını aynen yukarı at
+                    logger.error("DB fallback da başarısız: %s", db_exc)
+                    raise exc from db_exc
+
+                if historical is None:
+                    # DB boş — kullanıcı için yapacak bir şey yok
+                    logger.error("Canlı hata + DB boş → 503")
+                    raise exc
+
+                # DB verisini cache'le — tekrar tekrar DB'ye gitmeyelim
+                logger.info(
+                    "DB'deki en son snapshot kullanılıyor (timestamp=%s)",
+                    historical.get("timestamp"),
+                )
+                self._data = historical
+                self._fetched_at = dt.datetime.now()
+                self._source = "db"
+                return self._wrap(
+                    self._data, cached=False, live_error=live_error
+                )
+
+    def _wrap(
+        self, data: dict, cached: bool, live_error: Optional[str]
+    ) -> dict:
         return {
             "data": data,
             "cached": cached,
             "fetched_at": self._fetched_at.isoformat() if self._fetched_at else None,
+            "source": self._source or "unknown",
+            "live_error": live_error,
         }
 
 
@@ -115,12 +179,20 @@ async def status():
 
 @app.get("/api/snapshot")
 async def current_snapshot():
-    """Güncel piyasa verisini JSON döndürür (cache'li)."""
+    """Güncel piyasa verisini JSON döndürür (cache + DB fallback'li).
+
+    Başarı durumu:
+        200 + { data, cached, fetched_at, source, live_error }
+        - source="live" : canlı toplama başarılı
+        - source="db"   : canlı başarısız, DB'den dönüldü (data.is_historical=True)
+
+    Hata durumu (sadece canlı başarısız + DB boşken):
+        503 + { error, data: null }
+    """
     try:
-        result = await _cache.get_or_fetch()
-        return result
+        return await _cache.get_or_fetch()
     except Exception as exc:
-        logger.exception("Snapshot toplama başarısız")
+        logger.exception("Snapshot toplama başarısız ve DB fallback yok")
         return JSONResponse(
             status_code=503,
             content={"error": str(exc), "data": None},

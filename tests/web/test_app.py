@@ -24,9 +24,11 @@ def reset_cache():
     """Her testten önce cache'i sıfırla."""
     _cache._data = None
     _cache._fetched_at = None
+    _cache._source = None
     yield
     _cache._data = None
     _cache._fetched_at = None
+    _cache._source = None
 
 
 @pytest.fixture
@@ -164,15 +166,139 @@ def test_history_endpoint_handles_no_db(monkeypatch):
 
 
 def test_snapshot_endpoint_returns_503_on_failure(monkeypatch):
-    """Collect işlemi patlarsa 503 + error mesajı dönmeli."""
+    """Collect işlemi patlar VE DB boşsa → 503 + error mesajı dönmeli."""
 
     async def fake_collect():
         raise RuntimeError("TEFAS düştü")
+
+    import kizilelma.scheduler.daily_job as daily_job
+    import kizilelma.storage.db as db_mod
+    import kizilelma.web.app as web_app
+
+    monkeypatch.setattr(daily_job, "collect_all_data", fake_collect)
+    # DB fallback de None dönsün → gerçek 503
+    monkeypatch.setattr(web_app, "get_latest_full_snapshot", lambda: None, raising=False)
+    # get_latest_full_snapshot web.app içinde runtime import ediliyor;
+    # storage.db modülündeki de yamalayalım ki fallback yolu None döndürsün
+    monkeypatch.setattr(db_mod, "get_latest_full_snapshot", lambda engine=None: None)
+
+    client = TestClient(app)
+    r = client.get("/api/snapshot")
+    assert r.status_code == 503
+    assert "error" in r.json()
+
+
+def test_snapshot_falls_back_to_db_on_live_error(monkeypatch):
+    """Canlı veri çekilemezse DB'deki en son snapshot döndürülür."""
+
+    async def fake_collect():
+        raise RuntimeError("Network error")
+
+    fake_db_snap = {
+        "timestamp": "2026-04-22T10:00:00",
+        "snapshot_id": 99,
+        "is_historical": True,
+        "funds": [
+            {
+                "code": "AFA",
+                "name": "Test Fon",
+                "category": "Hisse",
+                "price": "1.0",
+                "date": "2026-04-22",
+                "return_1d": None,
+                "return_1w": None,
+                "return_1m": "5.0",
+                "return_3m": None,
+                "return_6m": None,
+                "return_1y": "50.0",
+                "is_qualified_investor": False,
+                "asset_tags": [],
+            }
+        ],
+        "repo_rates": [],
+        "bonds": [],
+        "sukuks": [],
+        "eurobonds": [],
+        "news": [],
+        "errors": {},
+    }
+
+    import kizilelma.scheduler.daily_job as daily_job
+    import kizilelma.storage.db as db_mod
+
+    monkeypatch.setattr(daily_job, "collect_all_data", fake_collect)
+    monkeypatch.setattr(
+        db_mod, "get_latest_full_snapshot", lambda engine=None: fake_db_snap
+    )
+
+    client = TestClient(app)
+    r = client.get("/api/snapshot")
+
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["source"] == "db"
+    assert payload["data"]["is_historical"] is True
+    assert len(payload["data"]["funds"]) == 1
+    assert payload["data"]["funds"][0]["code"] == "AFA"
+    assert "Network error" in (payload.get("live_error") or "")
+
+
+def test_snapshot_live_source_marks_not_historical(monkeypatch, mock_snapshot):
+    """Canlı başarılıysa source='live' ve is_historical=False olmalı."""
+
+    async def fake_collect():
+        return mock_snapshot
 
     import kizilelma.scheduler.daily_job as daily_job
     monkeypatch.setattr(daily_job, "collect_all_data", fake_collect)
 
     client = TestClient(app)
     r = client.get("/api/snapshot")
-    assert r.status_code == 503
-    assert "error" in r.json()
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["source"] == "live"
+    assert payload["data"]["is_historical"] is False
+    assert payload["live_error"] is None
+
+
+def test_get_latest_full_snapshot_returns_none_when_empty(tmp_path, monkeypatch):
+    """DB boşken get_latest_full_snapshot None dönmeli."""
+    from kizilelma.storage.db import (
+        get_engine,
+        get_latest_full_snapshot,
+        init_db,
+    )
+
+    # İzole test DB'si
+    db_file = tmp_path / "test_empty.db"
+    monkeypatch.setenv("KIZILELMA_DB", str(db_file))
+    engine = get_engine(str(db_file))
+    init_db(engine)
+
+    result = get_latest_full_snapshot(engine)
+    assert result is None
+
+
+def test_get_latest_full_snapshot_returns_last_record(tmp_path, monkeypatch, mock_snapshot):
+    """DB'de kayıt varsa en sonuncuyu dict olarak dönmeli."""
+    from kizilelma.storage.db import (
+        get_engine,
+        get_latest_full_snapshot,
+        init_db,
+        save_snapshot,
+    )
+
+    db_file = tmp_path / "test_full.db"
+    engine = get_engine(str(db_file))
+    init_db(engine)
+    save_snapshot(mock_snapshot, engine)
+
+    result = get_latest_full_snapshot(engine)
+    assert result is not None
+    assert result["is_historical"] is True
+    assert len(result["funds"]) == 2
+    assert result["funds"][0]["code"] in ("TGE", "AFA")
+    assert len(result["repo_rates"]) == 1
+    # Bonds/sukuks/eurobonds/news boş olmalı (DB'de ayrı tablo yok)
+    assert result["bonds"] == []
+    assert result["news"] == []

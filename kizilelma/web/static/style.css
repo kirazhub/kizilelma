@@ -968,3 +968,119 @@ body::after {
 }
 
 .flash { animation: flash 0.6s ease-out; }
+
+/* ==========================================================================
+   DATA FRESHNESS BANNER
+   Verinin ne zaman alındığını ve kaynağını (canlı / arşiv) gösterir.
+   Header'ın hemen altında tam genişlikte dar bir şerit olarak çıkar.
+   ========================================================================== */
+
+.freshness {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 8px 20px;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  animation: slideDown 0.4s ease-out;
+  z-index: 5;
+  position: relative;
+}
+
+.freshness strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.freshness .sep {
+  color: var(--border-bright);
+  font-weight: 300;
+  user-select: none;
+}
+
+.freshness-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.freshness-warn {
+  color: var(--accent-amber-bright);
+  font-weight: 500;
+}
+
+/* YEŞİL — < 1 saat, canlı taze veri */
+.freshness.fresh {
+  background: linear-gradient(90deg,
+    rgba(0, 255, 65, 0.06) 0%,
+    var(--bg-secondary) 100%);
+  color: var(--accent-green);
+}
+.freshness.fresh strong { color: var(--accent-green); }
+.freshness.fresh .freshness-dot {
+  background: var(--accent-green);
+  box-shadow: 0 0 8px var(--accent-green);
+  animation: pulse 2s infinite;
+}
+
+/* AMBER — 1-24 saat, biraz eski */
+.freshness.recent {
+  background: linear-gradient(90deg,
+    rgba(255, 140, 0, 0.06) 0%,
+    var(--bg-secondary) 100%);
+  color: var(--accent-amber);
+}
+.freshness.recent strong { color: var(--accent-amber); }
+.freshness.recent .freshness-dot {
+  background: var(--accent-amber);
+  box-shadow: 0 0 8px var(--accent-amber);
+}
+
+/* KIRMIZI — > 24 saat, çok eski veri */
+.freshness.stale {
+  background: linear-gradient(90deg,
+    rgba(255, 56, 96, 0.08) 0%,
+    var(--bg-secondary) 100%);
+  color: var(--accent-red);
+}
+.freshness.stale strong { color: var(--accent-red); }
+.freshness.stale .freshness-dot {
+  background: var(--accent-red);
+  box-shadow: 0 0 8px var(--accent-red);
+}
+
+/* HATA — canlı + DB ikisi de başarısız */
+.freshness.error {
+  background: rgba(255, 56, 96, 0.15);
+  color: var(--accent-red);
+  font-weight: 600;
+  border-bottom: 2px solid var(--accent-red);
+}
+.freshness.error strong { color: var(--accent-red); }
+.freshness.error .freshness-dot {
+  background: var(--accent-red);
+  box-shadow: 0 0 10px var(--accent-red);
+  animation: pulse 1s infinite;
+}
+
+/* BİLİNMEYEN — veri var ama timestamp yok */
+.freshness.unknown {
+  color: var(--text-muted);
+}
+.freshness.unknown .freshness-dot {
+  background: var(--text-muted);
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-100%); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}

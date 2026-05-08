@@ -14,6 +14,10 @@ const state = {
   snapshot: null,
   fetchedAt: null,
   cached: false,
+  source: null,          // "live" | "db" | "error"
+  isHistorical: false,   // DB'den mi geldi?
+  dataTimestamp: null,   // Verinin orijinal toplandığı an (snapshot.timestamp)
+  liveError: null,       // Canlı hata mesajı (varsa)
   lastAttempt: null,
   error: null,
   activePanel: null,
@@ -138,22 +142,113 @@ async function loadSnapshot({ silent = false } = {}) {
     state.snapshot = payload.data;
     state.cached = !!payload.cached;
     state.fetchedAt = payload.fetched_at ? new Date(payload.fetched_at) : new Date();
+    state.source = payload.source || 'unknown';
+    state.liveError = payload.live_error || null;
+    state.isHistorical = !!(payload.data && payload.data.is_historical);
+    // Verinin orijinal zamanı (snapshot.timestamp) — DB'den geldiyse eski olabilir
+    state.dataTimestamp = payload.data && payload.data.timestamp
+      ? new Date(payload.data.timestamp)
+      : state.fetchedAt;
     state.error = null;
 
     const fn = state.snapshot?.funds?.length || 0;
-    log(
-      'ok',
-      `Snapshot alındı: ${fn} fon · ${state.cached ? 'cache' : 'canlı'}`,
-    );
+    const srcLabel = state.source === 'db'
+      ? 'ARŞİV(DB)'
+      : state.cached ? 'cache' : 'canlı';
+    log('ok', `Snapshot alındı: ${fn} fon · ${srcLabel}`);
+
+    if (state.source === 'db' && state.liveError) {
+      log('err', `Canlı veri alınamadı, arşivden dönüldü: ${state.liveError}`);
+    }
 
     renderAll();
+    updateFreshnessBanner();
     flashAll();
   } catch (e) {
     state.error = e.message || String(e);
+    state.source = 'error';
     log('err', `Snapshot hatası: ${state.error}`);
     setStatus('ERROR', false);
+    updateFreshnessBanner();
     showErrors();
   }
+}
+
+// ----------------------------------------------------------------------------
+// DATA FRESHNESS BANNER — verinin ne zaman alındığını ve kaynağını gösterir
+// ----------------------------------------------------------------------------
+
+function updateFreshnessBanner() {
+  // Banner yoksa oluştur, header'ın hemen altına koy
+  let banner = document.getElementById('freshness-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'freshness-banner';
+    const header = document.querySelector('header');
+    if (header && header.parentNode) {
+      header.insertAdjacentElement('afterend', banner);
+    } else {
+      document.body.insertBefore(banner, document.body.firstChild);
+    }
+  }
+
+  // Hata durumu — canlı da yok DB de yok
+  if (state.source === 'error') {
+    banner.className = 'freshness error';
+    banner.innerHTML = `
+      <span class="freshness-dot"></span>
+      <strong>VERİ ÇEKİLEMEDİ</strong>
+      <span class="sep">│</span>
+      <span>${escapeHtml(state.error || 'bilinmeyen hata')}</span>
+    `;
+    return;
+  }
+
+  if (!state.dataTimestamp) {
+    banner.className = 'freshness unknown';
+    banner.innerHTML = '<span class="freshness-dot"></span> VERİ ZAMANI BİLİNMİYOR';
+    return;
+  }
+
+  const dataTime = state.dataTimestamp;
+  const now = new Date();
+  const ageMs = now.getTime() - dataTime.getTime();
+  const ageHours = ageMs / 1000 / 3600;
+
+  // Tazelik sınıfı: yeşil <1h, amber <24h, kırmızı >24h
+  let freshness, ageLabel;
+  if (ageHours < 1) {
+    freshness = 'fresh';
+    ageLabel = '● CANLI';
+  } else if (ageHours < 24) {
+    freshness = 'recent';
+    ageLabel = `◐ ${ageHours.toFixed(1)} SAAT ÖNCE`;
+  } else {
+    const days = Math.floor(ageHours / 24);
+    freshness = 'stale';
+    ageLabel = `◯ ${days} GÜN ÖNCE`;
+  }
+
+  // Tarih formatı (İstanbul saati)
+  const formatted = dataTime.toLocaleString('tr-TR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+    timeZone: 'Europe/Istanbul',
+    hour12: false,
+  });
+
+  const sourceLabel = state.source === 'db' ? 'ARŞİV (DB)' : 'CANLI';
+
+  banner.className = `freshness ${freshness}`;
+  banner.innerHTML = `
+    <span class="freshness-dot"></span>
+    <strong>DATA AS OF:</strong> ${escapeHtml(formatted)}
+    <span class="sep">│</span>
+    <span>KAYNAK: <strong>${sourceLabel}</strong></span>
+    <span class="sep">│</span>
+    <span>${ageLabel}</span>
+    ${state.liveError ? `<span class="sep">│</span><span class="freshness-warn">CANLI HATA: ${escapeHtml(truncate(state.liveError, 60))}</span>` : ''}
+  `;
 }
 
 function flashAll() {
@@ -201,7 +296,13 @@ function updateStatusBar() {
 
   $('#sb-cache').textContent = state.cached ? 'HIT' : 'FRESH';
   $('#sb-cache').className = 'status-val ' + (state.cached ? 'stale' : 'fresh');
-  setStatus('LIVE', true);
+
+  // Kaynak türüne göre üst sağdaki status etiketi
+  if (state.source === 'db') {
+    setStatus('ARCHIVE', false);  // Kırmızı nokta: canlı değil
+  } else {
+    setStatus('LIVE', true);
+  }
 }
 
 function updateTicker() {

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KIZILELMA // TERMINAL</title>
+
+  <!-- Google Fonts: monospace terminal + display -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
+    rel="stylesheet"
+  />
+
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🍎%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <!-- CRT / noise overlay katmanları CSS ile ekleniyor (::before, ::after) -->
+
+  <header class="terminal-header">
+    <div class="header-left">
+      <h1 class="logo display">
+        <span class="logo-icon">●</span>
+        KIZILELMA<span class="logo-slash">//</span><span class="logo-sub">TERMINAL</span>
+      </h1>
+      <span class="version">v0.1.0</span>
+    </div>
+
+    <div class="header-center">
+      <div class="ticker" id="ticker">
+        <span class="ticker-item">
+          <span class="ticker-label">TCMB</span>
+          <span class="ticker-value" id="ticker-tcmb">—</span>
+        </span>
+        <span class="ticker-sep">│</span>
+        <span class="ticker-item">
+          <span class="ticker-label">REPO</span>
+          <span class="ticker-value" id="ticker-repo">—</span>
+        </span>
+        <span class="ticker-sep">│</span>
+        <span class="ticker-item">
+          <span class="ticker-label">FUNDS</span>
+          <span class="ticker-value" id="ticker-funds">—</span>
+        </span>
+        <span class="ticker-sep">│</span>
+        <span class="ticker-item">
+          <span class="ticker-label">TOP 1Y</span>
+          <span class="ticker-value positive" id="ticker-top">—</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <div class="clock-block">
+        <span class="clock-label">IST</span>
+        <span class="clock" id="clock">--:--:--</span>
+        <span class="cursor"></span>
+      </div>
+      <div class="status-block">
+        <span class="status-dot live"></span>
+        <span class="status-label" id="status-text">LIVE</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="grid">
+
+    <!-- PANEL 1: Para Piyasası Fonları -->
+    <section class="panel" data-panel="funds" data-key="1">
+      <header class="panel-header">
+        <h2>
+          <span class="panel-num">01</span>
+          PARA PİYASASI FONLARI
+        </h2>
+        <div class="panel-meta">
+          <span class="panel-badge">TOP 10</span>
+          <span class="panel-hint">[1]</span>
+        </div>
+      </header>
+      <div class="panel-body" id="panel-funds-body">
+        <div class="loading">
+          <span class="blink">▊</span> VERİ ÇEKİLİYOR<span class="dots"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL 2: Tahvil / Sukuk -->
+    <section class="panel" data-panel="bonds" data-key="2">
+      <header class="panel-header">
+        <h2>
+          <span class="panel-num">02</span>
+          TAHVİL &amp; SUKUK
+        </h2>
+        <div class="panel-meta">
+          <span class="panel-badge">BIST</span>
+          <span class="panel-hint">[2]</span>
+        </div>
+      </header>
+      <div class="panel-body" id="panel-bonds-body">
+        <div class="loading">
+          <span class="blink">▊</span> VERİ ÇEKİLİYOR<span class="dots"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL 3: TCMB Faiz -->
+    <section class="panel panel-sm" data-panel="repo" data-key="3">
+      <header class="panel-header">
+        <h2>
+          <span class="panel-num">03</span>
+          TCMB FAİZ
+        </h2>
+        <div class="panel-meta">
+          <span class="panel-badge">GÜNCEL</span>
+          <span class="panel-hint">[3]</span>
+        </div>
+      </header>
+      <div class="panel-body" id="panel-repo-body">
+        <div class="loading">
+          <span class="blink">▊</span> VERİ ÇEKİLİYOR<span class="dots"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL 4: Eurobond -->
+    <section class="panel" data-panel="eurobond" data-key="4">
+      <header class="panel-header">
+        <h2>
+          <span class="panel-num">04</span>
+          EUROBOND
+        </h2>
+        <div class="panel-meta">
+          <span class="panel-badge">USD/EUR</span>
+          <span class="panel-hint">[4]</span>
+        </div>
+      </header>
+      <div class="panel-body" id="panel-eurobond-body">
+        <div class="loading">
+          <span class="blink">▊</span> VERİ ÇEKİLİYOR<span class="dots"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL 5: Günün Zirveleri -->
+    <section class="panel" data-panel="top" data-key="5">
+      <header class="panel-header">
+        <h2>
+          <span class="panel-num">05</span>
+          GÜNÜN ZİRVELERİ
+        </h2>
+        <div class="panel-meta">
+          <span class="panel-badge">1Y BEST</span>
+          <span class="panel-hint">[5]</span>
+        </div>
+      </header>
+      <div class="panel-body" id="panel-top-body">
+        <div class="loading">
+          <span class="blink">▊</span> VERİ ÇEKİLİYOR<span class="dots"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL 6: Canlı Log -->
+    <section class="panel panel-sm" data-panel="log" data-key="6">
+      <header class="panel-header">
+        <h2>
+          <span class="panel-num">06</span>
+          SİSTEM LOGU
+        </h2>
+        <div class="panel-meta">
+          <span class="panel-badge">LIVE</span>
+          <span class="panel-hint">[6]</span>
+        </div>
+      </header>
+      <div class="panel-body">
+        <ul class="log-feed" id="log-feed"></ul>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="status-bar" id="status-bar">
+    <span class="status-segment">
+      <span class="status-key">DATA</span>
+      <span class="status-val" id="sb-data">— funds</span>
+    </span>
+    <span class="status-sep">│</span>
+    <span class="status-segment">
+      <span class="status-key">LAST UPDATE</span>
+      <span class="status-val" id="sb-update">—</span>
+    </span>
+    <span class="status-sep">│</span>
+    <span class="status-segment">
+      <span class="status-key">CACHE</span>
+      <span class="status-val" id="sb-cache">—</span>
+    </span>
+    <span class="status-sep">│</span>
+    <span class="status-segment">
+      <span class="status-key">STATUS</span>
+      <span class="status-val live" id="sb-status">LIVE</span>
+    </span>
+    <span class="status-sep">│</span>
+    <span class="status-segment help">
+      <span class="kbd">R</span> refresh
+      <span class="kbd">/</span> search
+      <span class="kbd">1-6</span> focus
+    </span>
+  </footer>
+
+  <!-- Komut kutusu (/ tuşu ile açılır) -->
+  <div class="command-overlay" id="command-overlay" hidden>
+    <div class="command-box">
+      <span class="command-prompt">&gt;</span>
+      <input type="text" id="command-input" placeholder="fon kodu ara… (ESC kapatır)" autocomplete="off" />
+    </div>
+    <div class="command-results" id="command-results"></div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

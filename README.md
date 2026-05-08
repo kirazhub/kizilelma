@@ -13,7 +13,19 @@ Türkiye'deki yatırım fonları, tahviller, sukuk, repo ve eurobond getirilerin
 kizilelma test-telegram   # Telegram bağlantısını test et
 kizilelma run-now         # Şimdi tek bir rapor gönder
 kizilelma start           # Zamanlayıcıyı başlat (lokal kullanım)
+kizilelma-web             # Web arayüzünü başlat (http://localhost:8000)
 ```
+
+## Web Terminali
+
+Bloomberg Terminal tarzı bir web arayüzü gelir:
+
+- Koyu tema, monospace font (JetBrains Mono), amber vurgular
+- 6 panel: Para piyasası fonları, tahvil/sukuk, TCMB faiz, eurobond, günün zirveleri, canlı log
+- Canlı İstanbul saati, durum göstergesi, scan-line / grain efektleri
+- Klavye kısayolları: `1-6` panel odak, `/` fon arama, `R` manuel yenileme
+- 5 dakikalık otomatik yenileme, in-memory cache
+- Tek komut ile başlatılır: `kizilelma-web`
 
 ## Mimari
 

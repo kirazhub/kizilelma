@@ -15,6 +15,9 @@ dependencies = [
     "python-telegram-bot>=21.0",
     "apscheduler>=3.10.0",
     "sqlmodel>=0.0.16",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "jinja2>=3.1.0",
 ]
 
 [project.optional-dependencies]
@@ -31,3 +34,4 @@ testpaths = ["tests"]
 
 [project.scripts]
 kizilelma = "kizilelma.main:cli"
+kizilelma-web = "kizilelma.web.app:main"

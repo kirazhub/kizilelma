@@ -73,3 +73,62 @@ class ReportRecord(SQLModel, table=True):
     summary_section: Optional[str] = None
     sent_messages: int = 0
     status: str = "unknown"
+
+
+class BondRecord(SQLModel, table=True):
+    """DİBS / devlet tahvili kaydı (snapshot bazlı)."""
+
+    __tablename__ = "bonds"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    snapshot_id: int = Field(foreign_key="snapshots.id", index=True)
+    isin: str
+    maturity_date: dt.date
+    coupon_rate: Optional[float] = None
+    yield_rate: float
+    price: float
+    date: dt.date
+
+
+class SukukRecord(SQLModel, table=True):
+    """Kira sertifikası (sukuk) kaydı."""
+
+    __tablename__ = "sukuks"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    snapshot_id: int = Field(foreign_key="snapshots.id", index=True)
+    isin: str
+    issuer: str
+    maturity_date: dt.date
+    yield_rate: float
+    price: float
+    date: dt.date
+
+
+class EurobondRecord(SQLModel, table=True):
+    """Türkiye Eurobond kaydı."""
+
+    __tablename__ = "eurobonds"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    snapshot_id: int = Field(foreign_key="snapshots.id", index=True)
+    isin: str
+    maturity_date: dt.date
+    currency: str
+    yield_rate: float
+    price: float
+    date: dt.date
+
+
+class NewsRecord(SQLModel, table=True):
+    """Ekonomi haberi kaydı."""
+
+    __tablename__ = "news"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    snapshot_id: int = Field(foreign_key="snapshots.id", index=True)
+    title: str
+    url: str
+    source: str
+    published: dt.datetime
+    summary: Optional[str] = None

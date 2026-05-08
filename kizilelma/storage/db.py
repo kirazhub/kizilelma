@@ -13,10 +13,14 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from kizilelma.ai_advisor.advisor import AdvisorReport
 from kizilelma.models import MarketSnapshot
 from kizilelma.storage.models import (
+    BondRecord,
+    EurobondRecord,
     FundRecord,
+    NewsRecord,
     RepoRecord,
     ReportRecord,
     SnapshotRecord,
+    SukukRecord,
 )
 
 
@@ -86,6 +90,61 @@ def save_snapshot(snapshot: MarketSnapshot, engine=None) -> int:
                     maturity=r.maturity,
                     rate=float(r.rate),
                     date=r.date,
+                )
+            )
+
+        # DİBS tahvilleri
+        for b in snapshot.bonds:
+            session.add(
+                BondRecord(
+                    snapshot_id=snap_id,
+                    isin=b.isin,
+                    maturity_date=b.maturity_date,
+                    coupon_rate=_to_float(b.coupon_rate),
+                    yield_rate=float(b.yield_rate),
+                    price=float(b.price),
+                    date=b.date,
+                )
+            )
+
+        # Sukuk (kira sertifikaları)
+        for s in snapshot.sukuks:
+            session.add(
+                SukukRecord(
+                    snapshot_id=snap_id,
+                    isin=s.isin,
+                    issuer=s.issuer,
+                    maturity_date=s.maturity_date,
+                    yield_rate=float(s.yield_rate),
+                    price=float(s.price),
+                    date=s.date,
+                )
+            )
+
+        # Eurobondlar
+        for e in snapshot.eurobonds:
+            session.add(
+                EurobondRecord(
+                    snapshot_id=snap_id,
+                    isin=e.isin,
+                    maturity_date=e.maturity_date,
+                    currency=e.currency,
+                    yield_rate=float(e.yield_rate),
+                    price=float(e.price),
+                    date=e.date,
+                )
+            )
+
+        # Haberler
+        for n in snapshot.news:
+            session.add(
+                NewsRecord(
+                    snapshot_id=snap_id,
+                    title=n.title,
+                    url=n.url,
+                    source=n.source,
+                    published=n.published,
+                    summary=n.summary,
                 )
             )
 
@@ -213,6 +272,22 @@ def get_latest_full_snapshot(engine=None) -> Optional[dict]:
         repo_stmt = select(RepoRecord).where(RepoRecord.snapshot_id == snap.id)
         repo_records = list(session.exec(repo_stmt))
 
+        # Bonds (DİBS)
+        bond_stmt = select(BondRecord).where(BondRecord.snapshot_id == snap.id)
+        bond_records = list(session.exec(bond_stmt))
+
+        # Sukuks (kira sertifikaları)
+        sukuk_stmt = select(SukukRecord).where(SukukRecord.snapshot_id == snap.id)
+        sukuk_records = list(session.exec(sukuk_stmt))
+
+        # Eurobondlar
+        eb_stmt = select(EurobondRecord).where(EurobondRecord.snapshot_id == snap.id)
+        eb_records = list(session.exec(eb_stmt))
+
+        # Haberler
+        news_stmt = select(NewsRecord).where(NewsRecord.snapshot_id == snap.id)
+        news_records = list(session.exec(news_stmt))
+
         # errors JSON parse et — bozuksa boş dict
         try:
             errors = json.loads(snap.errors_json) if snap.errors_json else {}
@@ -251,11 +326,48 @@ def get_latest_full_snapshot(engine=None) -> Optional[dict]:
                 }
                 for r in repo_records
             ],
-            # Bonds/sukuks/eurobonds/news şu an ayrı tabloda tutulmuyor
-            # (sadece sayıları saklanıyor). v2'de tablo eklenirse doldurulur.
-            "bonds": [],
-            "sukuks": [],
-            "eurobonds": [],
-            "news": [],
+            "bonds": [
+                {
+                    "isin": b.isin,
+                    "maturity_date": b.maturity_date.isoformat(),
+                    "coupon_rate": str(b.coupon_rate) if b.coupon_rate is not None else None,
+                    "yield_rate": str(b.yield_rate),
+                    "price": str(b.price),
+                    "date": b.date.isoformat(),
+                }
+                for b in bond_records
+            ],
+            "sukuks": [
+                {
+                    "isin": s.isin,
+                    "issuer": s.issuer,
+                    "maturity_date": s.maturity_date.isoformat(),
+                    "yield_rate": str(s.yield_rate),
+                    "price": str(s.price),
+                    "date": s.date.isoformat(),
+                }
+                for s in sukuk_records
+            ],
+            "eurobonds": [
+                {
+                    "isin": e.isin,
+                    "maturity_date": e.maturity_date.isoformat(),
+                    "currency": e.currency,
+                    "yield_rate": str(e.yield_rate),
+                    "price": str(e.price),
+                    "date": e.date.isoformat(),
+                }
+                for e in eb_records
+            ],
+            "news": [
+                {
+                    "title": n.title,
+                    "url": n.url,
+                    "source": n.source,
+                    "published": n.published.isoformat(),
+                    "summary": n.summary,
+                }
+                for n in news_records
+            ],
             "errors": errors,
         }

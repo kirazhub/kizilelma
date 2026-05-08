@@ -21,6 +21,7 @@ Cache & fallback stratejisi:
 import asyncio
 import datetime as dt
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -33,6 +34,15 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 CACHE_TTL_SECONDS = 5 * 60  # 5 dakika
+
+# AI yorumu cache — saatte bir yenilenir (API maliyetini düşürür)
+AI_CACHE_DURATION = dt.timedelta(hours=1)
+_ai_cache: dict = {
+    "commentary": None,
+    "fetched_at": None,
+    "snapshot_timestamp": None,
+}
+_ai_lock = asyncio.Lock()
 
 
 class SnapshotCache:
@@ -219,6 +229,158 @@ async def history():
     except Exception as exc:
         logger.warning(f"History çekilemedi: {exc}")
         return []
+
+
+# ----------------------------------------------------------------------------
+# AI Commentary — Claude ile 2-3 cümlelik piyasa özeti
+# ----------------------------------------------------------------------------
+
+def _safe_float(value) -> float:
+    """String/None/float → float, başarısızsa 0.0 (crash etmez)."""
+    try:
+        return float(value) if value is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+async def _generate_ai_commentary(snapshot: dict) -> str:
+    """Snapshot verisinden Claude ile 2-3 cümlelik piyasa yorumu üret.
+
+    ANTHROPIC_API_KEY yoksa veya herhangi bir hata varsa istisna fırlatır —
+    çağıran fonksiyon zarif fallback yapar.
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise RuntimeError("AI key yok")
+
+    import anthropic  # lazy import — env yoksa hiç yüklenmesin
+
+    funds = snapshot.get("funds", []) or []
+    repo_rates = snapshot.get("repo_rates", []) or []
+    bonds = snapshot.get("bonds", []) or []
+
+    # En yüksek 1Y getirili 5 fon (sadece >0 olanlar)
+    top_funds = sorted(
+        [f for f in funds if _safe_float(f.get("return_1y")) > 0],
+        key=lambda f: _safe_float(f.get("return_1y")),
+        reverse=True,
+    )[:5]
+
+    fund_summary = ", ".join(
+        f"{f.get('code', '?')} ({(f.get('category') or '')[:20]}) "
+        f"%{_safe_float(f.get('return_1y')):.1f}"
+        for f in top_funds
+    ) or "veri yok"
+
+    # TCMB 1 haftalık repo oranı
+    policy_rate: Optional[float] = None
+    for r in repo_rates:
+        if r.get("type") == "repo" and r.get("maturity") == "1w":
+            policy_rate = _safe_float(r.get("rate"))
+            break
+
+    prompt = f"""Bugün Türkiye piyasa verileri:
+
+En iyi 5 fon (1Y getiri):
+{fund_summary}
+
+TCMB politika faizi: {f'{policy_rate:.2f}' if policy_rate else 'bilinmiyor'}%
+Toplam fon sayısı: {len(funds)}
+İzlenen tahvil: {len(bonds)}
+
+Bu verilerden yola çıkarak 2-3 cümlelik KISA ve ÖZ bir Türkçe piyasa yorumu yaz. Hikaye anlatma, sadece günün öne çıkan durumunu belirt. Örnek: "Para piyasası fonları güçlü. TCMB faizi sabit kalıyor. Kısa vadeli risksiz enstrümanlar önde."
+
+Yanıtında sadece yorum olsun, başka hiçbir şey yazma. 200 karakteri geçme."""
+
+    client = anthropic.AsyncAnthropic(api_key=api_key)
+    response = await client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=200,
+        system=(
+            "Sen Türkiye finansal piyasaları uzmanı bir analiz motorusun. "
+            "Çok kısa, net, veri odaklı yorumlar yazarsın. Hikaye anlatmaz, "
+            "sadece gözlem belirtirsin."
+        ),
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    return response.content[0].text.strip()
+
+
+@app.get("/api/ai_commentary")
+async def ai_commentary():
+    """Günün piyasa verisinden 2-3 cümlelik AI yorumu üret.
+
+    Cache: 1 saat boyunca aynı yorum tekrar kullanılır (API maliyet kontrolü).
+    ANTHROPIC_API_KEY yoksa veya hata varsa `commentary: null` döner — frontend
+    bunu zarif şekilde fallback gösterir.
+
+    Yanıt:
+        {"commentary": "...", "cached": bool, "generated_at": iso, "snapshot_timestamp": iso}
+        veya hata durumunda
+        {"commentary": null, "error": "..."}
+    """
+    now = dt.datetime.now()
+
+    # Cache kontrol — lock'suz, sadece okuma
+    if (
+        _ai_cache["commentary"] is not None
+        and _ai_cache["fetched_at"] is not None
+        and now - _ai_cache["fetched_at"] < AI_CACHE_DURATION
+    ):
+        return {
+            "commentary": _ai_cache["commentary"],
+            "cached": True,
+            "generated_at": _ai_cache["fetched_at"].isoformat(),
+            "snapshot_timestamp": _ai_cache["snapshot_timestamp"],
+        }
+
+    # Yenileme — lock al, aynı anda birden fazla istek API'yi dövmesin
+    async with _ai_lock:
+        # Başkası doldurmuş olabilir
+        if (
+            _ai_cache["commentary"] is not None
+            and _ai_cache["fetched_at"] is not None
+            and now - _ai_cache["fetched_at"] < AI_CACHE_DURATION
+        ):
+            return {
+                "commentary": _ai_cache["commentary"],
+                "cached": True,
+                "generated_at": _ai_cache["fetched_at"].isoformat(),
+                "snapshot_timestamp": _ai_cache["snapshot_timestamp"],
+            }
+
+        # Snapshot al (cache'ten gelir büyük ihtimalle)
+        try:
+            snap_payload = await _cache.get_or_fetch()
+            snapshot = snap_payload.get("data") or {}
+        except Exception as exc:
+            logger.warning("AI yorumu için snapshot alınamadı: %s", exc)
+            return {"commentary": None, "error": "Snapshot yok"}
+
+        if not snapshot:
+            return {"commentary": None, "error": "Snapshot boş"}
+
+        try:
+            commentary = await _generate_ai_commentary(snapshot)
+        except RuntimeError as exc:
+            # AI key yok — sessiz geç
+            return {"commentary": None, "error": str(exc)}
+        except Exception as exc:
+            logger.warning("AI yorumu üretilemedi: %s", exc)
+            return {"commentary": None, "error": str(exc)[:100]}
+
+        # Cache'le
+        _ai_cache["commentary"] = commentary
+        _ai_cache["fetched_at"] = now
+        _ai_cache["snapshot_timestamp"] = snapshot.get("timestamp")
+
+        return {
+            "commentary": commentary,
+            "cached": False,
+            "generated_at": now.isoformat(),
+            "snapshot_timestamp": snapshot.get("timestamp"),
+        }
 
 
 def main() -> None:

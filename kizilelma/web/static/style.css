@@ -1084,3 +1084,131 @@ body::after {
   from { transform: translateY(-100%); opacity: 0; }
   to   { transform: translateY(0); opacity: 1; }
 }
+
+/* ========================================
+   AI COMMENTARY BANNER
+   Günün 2-3 cümlelik Claude yorumu — zarif, tema ile uyumlu
+   ======================================== */
+
+.ai-commentary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 10px 20px 12px;
+  padding: 12px 18px;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 140, 0, 0.07) 0%,
+    rgba(0, 212, 255, 0.03) 100%
+  );
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-amber);
+  border-radius: 2px;
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  position: relative;
+  overflow: hidden;
+  animation: aiFadeIn 0.6s ease-out;
+}
+
+.ai-commentary::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 140, 0, 0.04) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: aiShimmer 6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes aiFadeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes aiShimmer {
+  0%   { transform: translateX(-100%); }
+  60%  { transform: translateX(100%); }
+  100% { transform: translateX(100%); }
+}
+
+.ai-commentary-icon {
+  color: var(--accent-amber);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  animation: aiPulse 2.4s ease-in-out infinite;
+}
+
+@keyframes aiPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+.ai-commentary-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0; /* text-overflow için */
+}
+
+.ai-commentary-label {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--accent-amber);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.ai-commentary-text {
+  color: var(--text-primary);
+  line-height: 1.5;
+  font-size: 13px;
+}
+
+.ai-commentary-text.loading {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.ai-commentary-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ai-commentary.error {
+  border-left-color: var(--accent-red);
+}
+
+.ai-commentary.error .ai-commentary-label,
+.ai-commentary.error .ai-commentary-icon {
+  color: var(--accent-red);
+}
+
+.ai-commentary.error .ai-commentary-text {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+@media (max-width: 700px) {
+  .ai-commentary {
+    flex-wrap: wrap;
+    margin: 8px 10px 10px;
+    padding: 10px 12px;
+  }
+  .ai-commentary-meta {
+    width: 100%;
+    text-align: right;
+  }
+}

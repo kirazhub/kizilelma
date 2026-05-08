@@ -65,6 +65,21 @@
     </div>
   </header>
 
+  <!-- AI Commentary Banner — freshness banner JS ile header'ın altına dinamik eklenir;
+       bu section onun altında kalır, panellerin üstünde durur. -->
+  <section id="ai-commentary" class="ai-commentary">
+    <div class="ai-commentary-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+        <path d="M12 2L3 7l9 5 9-5-9-5zm0 11.25L4.24 9l-1.24.7v6l9 5 9-5v-6l-1.24-.7L12 13.25z"/>
+      </svg>
+    </div>
+    <div class="ai-commentary-content">
+      <span class="ai-commentary-label">AI ANALİZ</span>
+      <span class="ai-commentary-text loading" id="ai-commentary-text">Analiz ediliyor<span class="dots"></span></span>
+    </div>
+    <div class="ai-commentary-meta" id="ai-commentary-meta"></div>
+  </section>
+
   <main class="grid">
 
     <!-- PANEL 1: Para Piyasası Fonları -->

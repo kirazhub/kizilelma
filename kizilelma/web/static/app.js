@@ -164,6 +164,9 @@ async function loadSnapshot({ silent = false } = {}) {
     renderAll();
     updateFreshnessBanner();
     flashAll();
+
+    // Snapshot hazır — AI yorumu da yüklensin (bağımsız, hata kendi içinde yutulur)
+    loadAICommentary();
   } catch (e) {
     state.error = e.message || String(e);
     state.source = 'error';
@@ -171,6 +174,69 @@ async function loadSnapshot({ silent = false } = {}) {
     setStatus('ERROR', false);
     updateFreshnessBanner();
     showErrors();
+  }
+}
+
+// ----------------------------------------------------------------------------
+// AI COMMENTARY — Claude ile üretilen 2-3 cümlelik piyasa özeti
+// ----------------------------------------------------------------------------
+
+/**
+ * AI yorumunu /api/ai_commentary'den yükler ve banner'a yazar.
+ * loadSnapshot başarılı olduktan sonra çağrılır. Hata durumunda
+ * sessizce fallback metni gösterir — kullanıcı asla "bozuk" ekran görmez.
+ */
+async function loadAICommentary() {
+  const textEl = document.getElementById('ai-commentary-text');
+  const metaEl = document.getElementById('ai-commentary-meta');
+  const banner = document.getElementById('ai-commentary');
+
+  if (!textEl) return; // Banner sayfada yoksa sessizce çık
+
+  // Loading state
+  textEl.textContent = 'Günün analizi hazırlanıyor…';
+  textEl.classList.add('loading');
+  if (metaEl) metaEl.textContent = '';
+  if (banner) banner.classList.remove('error');
+
+  try {
+    const res = await fetch('/api/ai_commentary');
+    const data = await res.json();
+
+    textEl.classList.remove('loading');
+
+    if (data && data.commentary) {
+      textEl.textContent = data.commentary;
+
+      if (metaEl) {
+        const gen = data.generated_at ? new Date(data.generated_at) : null;
+        const ageMin = gen ? Math.floor((Date.now() - gen.getTime()) / 60000) : 0;
+        let ageLabel;
+        if (ageMin < 1) ageLabel = 'ŞİMDİ';
+        else if (ageMin < 60) ageLabel = `${ageMin}DK ÖNCE`;
+        else ageLabel = `${Math.floor(ageMin / 60)}S ÖNCE`;
+        metaEl.textContent = data.cached ? `${ageLabel} · CACHED` : ageLabel;
+      }
+      log('ok', 'AI yorumu yüklendi');
+    } else {
+      // AI key yok veya üretim hatası — zarif fallback
+      const errMsg = (data && data.error) || '';
+      if (errMsg === 'AI key yok') {
+        textEl.textContent = 'AI analiz servisi şu anda pasif.';
+      } else if (errMsg) {
+        textEl.textContent = 'Veri analizi şu an kullanılamıyor.';
+      } else {
+        textEl.textContent = 'AI yorumu mevcut değil.';
+      }
+      if (banner) banner.classList.add('error');
+      if (metaEl) metaEl.textContent = 'OFFLINE';
+    }
+  } catch (e) {
+    console.error('AI yorumu yüklenemedi:', e);
+    textEl.classList.remove('loading');
+    textEl.textContent = 'AI analizi alınamadı.';
+    if (banner) banner.classList.add('error');
+    if (metaEl) metaEl.textContent = 'ERROR';
   }
 }
 

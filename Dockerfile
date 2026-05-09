@@ -13,17 +13,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Çalışma dizini
 WORKDIR /app
 
-# Bağımlılıkları önce kopyala (Docker cache için)
+# Önce TÜM kodu kopyala (paket kaynakları dahil)
 COPY pyproject.toml ./
 COPY README.md ./
-
-# Bağımlılıkları kur
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -e .
-
-# Kalan kodu kopyala
 COPY kizilelma/ ./kizilelma/
 COPY scripts/ ./scripts/
+
+# Editable kurulum (kizilelma paketini sistemi geneline kur)
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -e .
 
 # Kalıcı veri için klasör (Railway volume'u buraya mount edecek)
 RUN mkdir -p /data

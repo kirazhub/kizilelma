@@ -2421,3 +2421,108 @@ body::after {
     transform: none !important;
   }
 }
+
+/* ==========================================================================
+   DESKTOP İYİLEŞTİRMELER (701px ve üstü)
+   ========================================================================== */
+
+@media (min-width: 701px) {
+  /* Daha rahat tipografi */
+  body {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  
+  /* Panel header'lar daha şık */
+  .panel-header {
+    background: linear-gradient(180deg, 
+      rgba(255, 140, 0, 0.05) 0%, 
+      transparent 100%);
+    border-bottom: 1px solid var(--border-bright);
+  }
+  
+  /* Panel başlıkları amber renkli */
+  .panel-header h2 {
+    color: var(--accent-amber);
+    letter-spacing: 0.1em;
+  }
+  
+  /* Tablo satırları arası daha hoş */
+  .data-table tbody tr {
+    transition: all 0.2s ease;
+  }
+  
+  /* Active panel highlight güçlendir */
+  .panel.active {
+    box-shadow: 0 0 0 2px var(--accent-cyan);
+  }
+  
+  /* Logo ışıltı efekti */
+  .logo {
+    background: linear-gradient(90deg, 
+      var(--accent-amber) 0%, 
+      var(--accent-amber-bright) 50%, 
+      var(--accent-amber) 100%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer 3s ease-in-out infinite;
+  }
+  
+  @keyframes shimmer {
+    0%, 100% { background-position: 0% center; }
+    50% { background-position: 100% center; }
+  }
+  
+  /* Gradient mesh background */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: 
+      radial-gradient(circle at 20% 80%, rgba(255, 140, 0, 0.03) 0%, transparent 50%),
+      radial-gradient(circle at 80% 20%, rgba(0, 212, 255, 0.02) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: -1;
+  }
+  
+  /* Daha iyi scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-bright);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-amber);
+  }
+}
+
+/* Geçişler ve animasyonlar daha akıcı */
+* {
+  transition-property: background-color, border-color, color, transform;
+  transition-duration: 0.15s;
+  transition-timing-function: ease;
+}
+
+/* Yüksek kontrast (yaşlı gözleri için) */
+@media (prefers-contrast: high) {
+  :root {
+    --text-primary: #ffffff;
+    --text-secondary: #cccccc;
+  }
+}
+
+/* Reduced motion (animasyonlardan rahatsız olanlar için) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

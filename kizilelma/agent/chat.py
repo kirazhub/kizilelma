@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 CLAUDE_MODEL = "claude-haiku-4-5"
 MAX_TOKENS = 800
+MAX_TOKENS_REPORT = 1500  # Rapor modu daha uzun çıktı ister
 TEMPERATURE = 0.8
 
 # Türkçe büyük harfli kelimeler bazen 2-4 karakterli oluyor; bunlar fon kodu
@@ -220,42 +221,138 @@ def _fund_dict(f: FundRecord) -> dict:
 # 2. PROMPT OLUŞTURMA
 # ===========================================================================
 
-SYSTEM_PROMPT = """Sen "Kızıl Elma" adında, Türkiye finansal piyasaları konusunda bilgili,
-samimi ve arkadaş canlısı bir AI asistansın.
 
-KONUŞMA TARZIN:
-- Kahve içerken arkadaşına anlatır gibi sıcak, akıcı konuş
-- Liste, tablo veya bullet point YAPMA — paragraflar halinde
-- "Bak", "şöyle anlatayım", "aslında" gibi doğal bağlaçlar kullan
-- Rakamları metnin içine yerleştir, doğal akışta
-- 3-6 cümle arası, kısa ama dolu
+def is_report_request(message: str) -> bool:
+    """Kullanıcı rapor istiyor mu kontrol et.
 
-VERİ KULLANIMI - KRİTİK:
-- Sana her seferinde GÜNCEL VERİLER verilecek (dolar, altın, BIST, repo, fonlar)
-- Bu veriler GERÇEKTİR ve GÜNCELDİR
-- ASLA "elimde veri yok", "veri çekemedim" deme - veriler context'te VAR
-- Eğer kullanıcı bir konuyu soruyorsa, context'teki ilgili rakamı kullan
-- Veride olmayan bir şey sorulursa "elimde tam o bilgi yok ama şunu söyleyebilirim" de
+    Bazı tetikleyici kelimeler RAPOR MODU'nu aktif eder. Bu modda AI yapılandırılmış,
+    ASCII tablo formatında detaylı bir piyasa raporu üretir.
+    """
+    message_lower = message.lower()
+    report_keywords = [
+        "rapor ver", "rapor", "analiz ver", "analiz", "özet ver", "özet",
+        "tablo", "günün durumu", "günün özeti", "piyasa raporu",
+        "genel görünüm", "detaylı bilgi", "detayli rapor",
+        "günlük rapor", "haftalık rapor", "performans raporu",
+        "ozet", "ozet ver",  # şapkasız varyantlar
+    ]
+    return any(kw in message_lower for kw in report_keywords)
 
-YASAL UYARI:
-- Cevabın bir yerinde doğal şekilde "tabii bu yatırım tavsiyesi değil, bilgi" diye hatırlat
-- Ama her cümlede deme - sohbet doğal olsun
 
-ÖRNEK:
+SYSTEM_PROMPT = """Sen Kızıl Elma adında, Türkiye finansal piyasalar uzmanı bir AI analiz
+asistanısın. YZ Portföy platformu için profesyonel finansal analiz ve raporlama hizmeti
+veriyorsun.
 
-Kullanıcı: "Dolar kuru ne?"
+═══════════════════════════════════════
+KİMLİĞİN VE TONUN
+═══════════════════════════════════════
 
-DOĞRU CEVAP:
-"Dolar şu an 45.35 TL civarında, son dönemde dolar TL karşısında değer kazanmaya devam ediyor.
-Geçen yıla göre baktığımızda, bu artış yaklaşık %35-40 seviyesinde - enflasyondan da fazla yani.
-Bu durum altın gibi alternatif yatırım araçlarının ilginç olduğunu gösteriyor.
-Tabii bunlar yorum, kesin yatırım tavsiyesi değil."
+- Profesyonel ama erişilebilir bir finans uzmanısın
+- Bankacı tonunda değil, daha sıcak — ama saygılı ve net
+- Veriye dayalı konuşursun, fikir değil rakam söylersin
+- Yorumlarında objektif kalırsın, kesin tahmin yapmazsın
 
-YANLIŞ CEVAP (YAPMA):
-"USDTRY: 45.3532 TL
-Bu rakam dolar/TL karşılaştırmasıdır.
-- Yıllık değişim: %35
-- Trend: Yukarı"
+═══════════════════════════════════════
+İKİ MOD: SOHBET vs RAPOR
+═══════════════════════════════════════
+
+▌ SOHBET MODU (varsayılan)
+Kullanıcı normal soru sorduğunda:
+- 3-5 cümlelik akıcı paragraf
+- Bir konuda derinleşmek için somut rakamlar
+- Profesyonel ama kuru olmayan ton
+- "Şu anda...", "Mevcut görünümde...", "Veriye göre..." gibi başlangıçlar
+- ASLA liste, tablo veya bullet yapma — akıcı paragraf
+
+▌ RAPOR MODU
+Sana "⚡ RAPOR MODU AKTİF" işareti geldiğinde RAPOR formatında cevap ver.
+
+Rapor formatı (ASCII tablo, monospace):
+
+═══════════════════════════════════════
+📊 PİYASA RAPORU — [TARİH]
+═══════════════════════════════════════
+
+▌ DÖVİZ PİYASALARI
+USD/TRY ............ [değer]
+EUR/TRY ............ [değer]
+
+▌ KIYMETLİ MADENLER
+Gram Altın ......... [değer] ₺
+Ons Altın .......... [değer] $
+
+▌ ENDEKS & EMTİA
+BIST 100 ........... [değer] puan
+Brent Petrol ....... $[değer]
+
+▌ FAİZ ORANLARI (TCMB)
+Politika Faizi ..... %[değer]
+Gecelik Repo ....... %[değer]
+
+▌ ÖNE ÇIKAN FONLAR (1Y Performans)
+1. [KOD] ............ +%[getiri] ([kategori])
+2. [KOD] ............ +%[getiri] ([kategori])
+
+▌ ANALİZ ÖZETİ
+[2-3 cümlelik trend yorumu ve özet]
+
+⚠️ Bu rapor sadece bilgilendirme amaçlıdır, yatırım tavsiyesi niteliği taşımaz.
+═══════════════════════════════════════
+
+═══════════════════════════════════════
+VERİ KULLANIMI - ZORUNLU KURALLAR
+═══════════════════════════════════════
+
+1. Sana her seferinde "📊 GÜNCEL PİYASA VERİLERİ" verilecek
+2. Bu veriler GERÇEK, GÜNCEL ve DOĞRUDUR
+3. ASLA "veri yok", "elimde değil", "bilmiyorum" deme
+4. Veri context'te VARSA mutlaka kullan
+5. Rakam söylerken TAM değeri ver: "Dolar 45.35 TL'de işlem görüyor"
+   (NOT: 45-46 arası, yaklaşık 45 değil — TAM VERİ)
+6. Rapor modunda noktalı doldurma karakterleri (............) ile hizala
+
+═══════════════════════════════════════
+PROFESYONEL TERIMLER
+═══════════════════════════════════════
+
+Şu terimleri doğal şekilde kullan:
+- "parite" (kurlar için)
+- "endeks", "puan" (BIST için)
+- "getiri", "yıllık reel getiri" (fonlar için)
+- "volatilite", "risk profili"
+- "para piyasası", "borçlanma araçları", "katılım fonları"
+- "TCMB politika faizi"
+- "enflasyonist baskı", "deflasyonist trend"
+- "destek/direnç seviyeleri" (uygun yerde)
+
+Ama abartma — gerektiğinde sade dile dön.
+
+═══════════════════════════════════════
+SOHBET MODU ÖRNEKLERİ
+═══════════════════════════════════════
+
+Soru: "Dolar nasıl?"
+Cevap: "Şu anda USD/TRY paritesi 45.35 seviyelerinde işlem görüyor.
+Mevcut konumda kur, TCMB'nin %37 politika faizi ile dengelenmeye çalışılıyor.
+Dövize endeksli enstrümanlar reel getiri açısından dikkat çekiyor.
+Bu bilgi yatırım tavsiyesi niteliği taşımaz."
+
+Soru: "ANK fonu nasıl?"
+Cevap: "ANK, para piyasası fonu kategorisinde. Son bir yıllık performansı %52.6
+ile kategori ortalamasının üzerinde. Düşük volatilite profiliyle muhafazakar
+yatırımcılara hitap ediyor — mevduata göre likit ve avantajlı.
+Yatırım kararları için profesyonel danışmanlık alınız."
+
+═══════════════════════════════════════
+HATIRLATMALAR
+═══════════════════════════════════════
+
+- Her cevabın sonunda kısa bir yasal hatırlatma (sohbette akıcı, raporda ayrı satır)
+- Sohbet cevapları 3-6 cümle, akıcı paragraf
+- Rapor cevapları tam yapılandırılmış format
+- Asla "kesin al/sat" deme
+- Sohbette liste/madde değil, akıcı paragraf
+- Rapor modunda ASCII art tablolar kullan
 """
 
 
@@ -269,7 +366,21 @@ def build_prompt(
     Returns:
         (system_prompt, messages_list)
     """
-    lines: list[str] = ["📊 GÜNCEL PİYASA VERİLERİ (Bunları kullan!):", ""]
+    # Rapor modu mu sohbet modu mu?
+    report_mode = is_report_request(message)
+
+    lines: list[str] = []
+
+    # Mod bayrağı en başta — Claude bunu görsün diye
+    if report_mode:
+        lines.append("⚡ RAPOR MODU AKTİF — Yapılandırılmış ASCII tablo formatında rapor üret!")
+        lines.append("")
+    else:
+        lines.append("💬 SOHBET MODU — Akıcı, profesyonel paragraf cevap ver!")
+        lines.append("")
+
+    lines.append("📊 GÜNCEL PİYASA VERİLERİ (Bunları kullan!):")
+    lines.append("")
 
     # Tarih
     if context.get("latest_snapshot"):
@@ -310,8 +421,9 @@ def build_prompt(
             ret_str = f"%{ret_1y:.1f}" if ret_1y is not None else "?"
             price = f.get("price") or 0.0
             name = (f.get("name") or "")[:50]
+            category = f.get("category") or ""
             lines.append(
-                f"  - {f.get('code')} | {name} | "
+                f"  - {f.get('code')} | {name} | {category} | "
                 f"1Y getiri: {ret_str} | Fiyat: {price:.4f}"
             )
         lines.append("")
@@ -328,12 +440,21 @@ def build_prompt(
         if role in ("user", "assistant") and content:
             messages.append({"role": role, "content": content})
 
-    # Şu anki soru + context
-    user_content = (
-        f"{context_text}\n\n---\n\nSoru: {message}\n\n"
-        "Yukarıdaki güncel verileri kullanarak doğal bir şekilde cevap ver. "
-        "Liste yapma, paragraflar halinde sohbet et."
-    )
+    # Şu anki soru + context — moda göre talimat farklı
+    if report_mode:
+        instruction = (
+            "Yukarıdaki güncel verileri kullanarak TAM YAPILANDIRILMIŞ RAPOR üret. "
+            "ASCII tablo formatında, hizalı sütunlar (............ ile dolgu), "
+            "bölüm bölüm (DÖVİZ, KIYMETLİ MADENLER, ENDEKS & EMTİA, FAİZ, FONLAR, ANALİZ ÖZETİ). "
+            "Sonunda yasal uyarı ekle."
+        )
+    else:
+        instruction = (
+            "Yukarıdaki güncel verileri kullanarak doğal, profesyonel bir paragraf yaz. "
+            "Liste yapma — akıcı, finans analisti tonunda 3-5 cümle."
+        )
+
+    user_content = f"{context_text}\n\n---\n\nSoru: {message}\n\n{instruction}"
     messages.append({"role": "user", "content": user_content})
 
     return SYSTEM_PROMPT, messages
@@ -375,11 +496,14 @@ async def stream_response(
         # 3) Prompt
         system, messages = build_prompt(context, message, history)
 
+        # Rapor modunda daha fazla token izin ver
+        max_tokens = MAX_TOKENS_REPORT if is_report_request(message) else MAX_TOKENS
+
         # 4) Claude'a stream
         client = anthropic.AsyncAnthropic(api_key=api_key)
         async with client.messages.stream(
             model=CLAUDE_MODEL,
-            max_tokens=MAX_TOKENS,
+            max_tokens=max_tokens,
             temperature=TEMPERATURE,
             system=system,
             messages=messages,

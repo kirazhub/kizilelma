@@ -1,4 +1,5 @@
 """Sıralama ve filtreleme yardımcıları."""
+import datetime as dt
 from collections import defaultdict
 from decimal import Decimal
 from typing import Literal
@@ -66,3 +67,56 @@ def filter_qualified(
         else:
             standart.append(fund)
     return standart, serbest
+
+
+def filter_active_funds(
+    funds: list[FundData],
+    max_age_days: int = 7,
+) -> list[FundData]:
+    """İşlem görmeyen / ölü fonları filtrele.
+
+    Bir fon aktif sayılır eğer:
+    - Fiyatı > 0 (Pydantic zaten zorluyor ama defansif kontrol)
+    - Fiyatının tarihi son `max_age_days` gün içinde
+    - En az bir getiri değeri (1G/1H/1A/3A/6A/1Y) sıfırdan farklı
+
+    Args:
+        funds: Tüm fonların listesi
+        max_age_days: Fiyat tarihinin en eski olabileceği gün sayısı
+
+    Returns:
+        Sadece aktif (TEFAS'ta hâlâ işlem gören) fonların listesi.
+    """
+    today = dt.date.today()
+    cutoff = today - dt.timedelta(days=max_age_days)
+    active: list[FundData] = []
+
+    for f in funds:
+        # Kontrol 1: Fiyat pozitif olmalı
+        if f.price is None or f.price <= 0:
+            continue
+
+        # Kontrol 2: Tarih güncel olmalı (son max_age_days içinde)
+        if f.date is None or f.date < cutoff:
+            continue
+
+        # Kontrol 3: En az bir getiri değeri 0'dan farklı olmalı
+        has_return = False
+        for metric in (
+            f.return_1d,
+            f.return_1w,
+            f.return_1m,
+            f.return_3m,
+            f.return_6m,
+            f.return_1y,
+        ):
+            if metric is not None and metric != 0:
+                has_return = True
+                break
+
+        if not has_return:
+            continue
+
+        active.append(f)
+
+    return active

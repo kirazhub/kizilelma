@@ -1729,3 +1729,227 @@ body::after {
     min-height: 44px;
   }
 }
+
+/* ==========================================================================
+   📱 MOBIL OPTIMIZE — KAPSAMLI (700px ve altı)
+   - Yatay kaydırma YOK
+   - Ticker'lar 2 bant alt alta
+   - Tüm bilgiler alt alta
+   - Touch dostu boyutlar
+   ========================================================================== */
+
+@media (max-width: 700px) {
+  /* HİÇBİR YATAY KAYDIRMA YOK */
+  html, body {
+    overflow-x: hidden !important;
+    max-width: 100vw;
+    width: 100%;
+  }
+  
+  body {
+    overflow-y: auto;
+  }
+
+  /* HEADER — Logo + Saat alt alta */
+  .header {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .logo {
+    font-size: 18px !important;
+    letter-spacing: 0.05em !important;
+  }
+
+  .logo-sub {
+    font-size: 11px !important;
+  }
+
+  /* TICKER — 2 bant grid (4 öğeyi 2x2 yerleştir) */
+  .ticker {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 12px;
+    width: 100%;
+    margin: 8px 0;
+    padding: 10px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .ticker-sep {
+    display: none !important;
+  }
+
+  .ticker-item {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2px !important;
+    align-items: flex-start !important;
+    font-size: 11px !important;
+  }
+
+  .ticker-label {
+    font-size: 9px !important;
+    color: var(--text-secondary) !important;
+    letter-spacing: 0.1em;
+  }
+
+  .ticker-value {
+    font-size: 14px !important;
+    font-weight: 600 !important;
+  }
+
+  /* CLOCK alanı */
+  .clock-area {
+    width: 100%;
+    text-align: right;
+    font-size: 11px;
+  }
+
+  /* MAIN GRID — tek kolon, sıralı */
+  .grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    padding: 8px !important;
+    height: auto !important;
+  }
+
+  .right-column {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+
+  /* PANEL — Mobilde ferah */
+  .panel {
+    min-height: auto !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .panel-header {
+    padding: 10px 12px !important;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .panel-header h2 {
+    font-size: 12px !important;
+    letter-spacing: 0.08em !important;
+  }
+
+  .panel-num {
+    font-size: 10px !important;
+  }
+
+  .panel-badge {
+    font-size: 9px !important;
+    padding: 2px 6px !important;
+  }
+
+  .panel-body {
+    padding: 8px !important;
+    overflow-x: hidden !important;
+  }
+
+  /* TABLOLAR — Yatay kaydırma yerine alt alta kart */
+  .data-table,
+  .top-picks-table {
+    width: 100% !important;
+    table-layout: fixed !important;
+    word-wrap: break-word;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 6px 4px !important;
+    font-size: 11px !important;
+    word-break: break-word;
+  }
+
+  /* Çok kolonlu tablo, mobilde gereksizleri gizle */
+  .data-table .hide-mobile {
+    display: none !important;
+  }
+
+  /* Fund kategori başlığı */
+  .fund-category-title {
+    font-size: 11px !important;
+    padding: 6px 8px !important;
+    margin: 8px 0 6px !important;
+  }
+
+  /* Top picks (zirveler) */
+  .top-picks-table .rank {
+    width: 28px !important;
+    font-size: 12px !important;
+  }
+
+  .top-picks-table .code {
+    font-size: 11px !important;
+    width: 50px !important;
+  }
+
+  .top-picks-table .name {
+    font-size: 10px !important;
+  }
+
+  /* TCMB paneli özel */
+  #panel-tcmb .panel-body {
+    padding: 12px !important;
+  }
+
+  /* Status bar (alt) */
+  .status-bar {
+    flex-wrap: wrap !important;
+    font-size: 10px !important;
+    padding: 6px 10px !important;
+    gap: 6px 12px !important;
+  }
+
+  .status-bar-item {
+    font-size: 10px !important;
+  }
+
+  /* AI Commentary banner */
+  .ai-commentary {
+    flex-wrap: wrap !important;
+    margin: 8px !important;
+    padding: 10px 12px !important;
+    gap: 8px !important;
+  }
+
+  .ai-commentary-text {
+    font-size: 12px !important;
+    width: 100%;
+  }
+
+  .ai-commentary-meta {
+    font-size: 9px !important;
+    width: 100%;
+    text-align: right;
+  }
+
+  /* Freshness banner */
+  .freshness-banner {
+    flex-wrap: wrap !important;
+    padding: 6px 10px !important;
+    font-size: 10px !important;
+    gap: 4px 10px !important;
+  }
+}
+
+/* Çok küçük ekranlar (telefon dik) */
+@media (max-width: 380px) {
+  .ticker {
+    grid-template-columns: 1fr !important;
+  }
+  
+  .logo {
+    font-size: 16px !important;
+  }
+}

@@ -22,7 +22,11 @@ from kizilelma.ai_advisor.formatters import (
     format_sukuks,
     format_top_picks,
 )
-from kizilelma.analyzers.ranker import filter_qualified, top_funds_by_return
+from kizilelma.analyzers.ranker import (
+    filter_active_funds,
+    filter_qualified,
+    top_funds_by_return,
+)
 from kizilelma.models import FundData, MarketSnapshot
 
 
@@ -30,8 +34,8 @@ from kizilelma.models import FundData, MarketSnapshot
 class AdvisorReport:
     """Günlük raporun tüm bölümleri.
 
-    Her alan bir Telegram mesajına karşılık gelir. None olan alanlar
-    gönderim sırasında atlanır.
+    Her alan rapor içinde ayrı bir bölüme karşılık gelir. None olan alanlar
+    sunum sırasında atlanır.
     """
 
     # Fon kategorileri (TOP 10)
@@ -81,7 +85,10 @@ class AIAdvisor:
         report = AdvisorReport()
 
         try:
-            standart_funds, serbest_funds = filter_qualified(snapshot.funds)
+            # Önce TEFAS'ta aktif işlem görmeyen (fiyatı eski / tüm getirileri
+            # 0 olan) fonları ele — rapor temizliği için kritik.
+            active_funds = filter_active_funds(snapshot.funds)
+            standart_funds, serbest_funds = filter_qualified(active_funds)
 
             # Kategori eşleşmeleri — Türkçe/İngilizce ve küçük harf farklarını
             # karşılamak için birden çok anahtar kelime kullanılıyor.
@@ -98,7 +105,7 @@ class AIAdvisor:
                 if _match_category(f, ["karma", "değişken", "degisken", "fon sepeti"])
             ]
             katilim = [
-                f for f in snapshot.funds  # Katılım hem standart hem serbest olabilir
+                f for f in active_funds  # Katılım hem standart hem serbest olabilir
                 if _match_category(f, ["katılım", "katilim"])
             ]
             borc = [

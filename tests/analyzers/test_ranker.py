@@ -9,6 +9,7 @@ from kizilelma.analyzers.ranker import (
     top_funds_by_return,
     top_funds_by_category,
     filter_qualified,
+    filter_active_funds,
 )
 
 
@@ -86,3 +87,69 @@ def test_top_funds_handles_none_metric_safely():
     ]
     top = top_funds_by_return(funds, metric="return_1m", limit=10)
     assert top[0].code == "A"
+
+
+def test_filter_active_funds_removes_zero_returns():
+    """Tüm getirileri 0 olan fonlar (ölü / işlem görmeyen) listeden çıkarılır."""
+    aktif = _make_fund("A", Decimal("5"))
+    pasif = FundData(
+        code="X",
+        name="Ölü Fon",
+        category="Hisse",
+        price=Decimal("1"),
+        date=dt.date.today(),
+        return_1m=Decimal(0),
+        return_1y=Decimal(0),
+    )
+
+    result = filter_active_funds([aktif, pasif])
+    assert len(result) == 1
+    assert result[0].code == "A"
+
+
+def test_filter_active_funds_removes_old_dates():
+    """Fiyat tarihi çok eski olan fonlar çıkarılır."""
+    guncel = _make_fund("A", Decimal("5"))
+    eski = FundData(
+        code="X",
+        name="Eski Tarihli",
+        category="Hisse",
+        price=Decimal("1"),
+        date=dt.date.today() - dt.timedelta(days=30),
+        return_1m=Decimal("5"),
+    )
+
+    result = filter_active_funds([guncel, eski])
+    assert len(result) == 1
+    assert result[0].code == "A"
+
+
+def test_filter_active_funds_keeps_fund_with_at_least_one_return():
+    """1A getirisi 0 olsa bile 1Y getirisi varsa fon aktif sayılır."""
+    fund = FundData(
+        code="X",
+        name="Sadece 1Y Getirisi",
+        category="Hisse",
+        price=Decimal("1"),
+        date=dt.date.today(),
+        return_1m=Decimal(0),
+        return_1y=Decimal("50"),
+    )
+
+    result = filter_active_funds([fund])
+    assert len(result) == 1
+    assert result[0].code == "X"
+
+
+def test_filter_active_funds_removes_all_none_returns():
+    """Tüm getiri alanları None olan fonlar da çıkarılır."""
+    fund = FundData(
+        code="X",
+        name="Hiç Veri Yok",
+        category="Hisse",
+        price=Decimal("1"),
+        date=dt.date.today(),
+    )
+
+    result = filter_active_funds([fund])
+    assert len(result) == 0

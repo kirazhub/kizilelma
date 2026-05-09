@@ -71,6 +71,20 @@ def retrieve_context(question: str, engine=None) -> dict:
         import re
         fund_codes_in_question = re.findall(r'\b[A-Z]{2,4}\b', question)
 
+        # Türkçe stop words / yaygın kısaltmalar — bunlar fon kodu DEĞİL.
+        # Yanlış pozitifleri filtrele (örn. "TCMB faizi ne kadar?" → TCMB
+        # fon kodu sanılmasın). NOT: "ANK" gerçek bir fon kodu (Ata Portföy)
+        # olduğu için listeye eklenmedi.
+        TURKISH_STOPWORDS = {
+            'TCMB', 'BIST', 'USD', 'EUR', 'TL', 'AI', 'YTL',
+            'KDV', 'TÜM', 'NE', 'NEDIR', 'NASIL', 'EN', 'KAÇI', 'KAÇ',
+            'NEDEN', 'AB', 'ABD',
+        }
+        fund_codes_in_question = [
+            c for c in fund_codes_in_question
+            if c not in TURKISH_STOPWORDS
+        ]
+
         # Kategori keyword'leri
         category_keywords = {
             "para piyas": "Para Piyasası",
@@ -126,6 +140,19 @@ def retrieve_context(question: str, engine=None) -> dict:
                     fund_matches.append(match)
             if fund_matches:
                 context["funds"] = [_fund_to_dict(f) for f in fund_matches]
+                # Kullanıcı 2+ fon sorduysa ve karşılaştırma kelimesi
+                # geçiyorsa "karşılaştırma modu"nu aç. AI prompt'unda fonlar
+                # yan yana detaylı analiz formatında yazılır.
+                comparison_keywords = [
+                    'fark', 'kıyas', 'karşılaştır', 'hangisi', ' vs ', ' ve ',
+                    ' ile ',
+                ]
+                is_comparison = (
+                    len(fund_matches) >= 2
+                    and any(kw in q_lower for kw in comparison_keywords)
+                )
+                if is_comparison:
+                    context["comparison_mode"] = True
 
         # Kategori sorgusu
         elif any(kw in q_lower for kw in category_keywords):
@@ -385,18 +412,43 @@ def format_context_for_prompt(context: dict) -> str:
 
     funds = context.get("funds", [])
     if funds:
-        parts.append("### İLGİLİ FONLAR")
-        for f in funds:
-            tags_list = f.get("asset_tags") or []
-            tags_str = ", ".join(tags_list) if tags_list else "-"
+        if context.get("comparison_mode"):
+            # Karşılaştırma modu — fonlar yan yana detaylı blok halinde.
+            parts.append("### KARŞILAŞTIRMA İSTENİLEN FONLAR")
             parts.append(
-                f"- {f['code']} | {f['name'][:40]} | Kategori: {f['category']} | "
-                f"Etiketler: {tags_str} | "
-                f"Fiyat: {f['price']} TL | "
-                f"1G: %{f['return_1d'] or '-'} | 1A: %{f['return_1m'] or '-'} | "
-                f"3A: %{f['return_3m'] or '-'} | 1Y: %{f['return_1y'] or '-'}"
+                "Kullanıcı bu fonları karşılaştırmak istiyor. Her birini "
+                "detaylı analiz et; getiri, kategori ve risk açısından "
+                "doğrudan kıyasla."
             )
-        parts.append("")
+            parts.append("")
+            for f in funds:
+                tags_list = f.get("asset_tags") or []
+                tags_str = ", ".join(tags_list) if tags_list else "-"
+                parts.append(f"━━━ {f['code']} ━━━")
+                parts.append(f"  Ad: {f['name']}")
+                parts.append(f"  Kategori: {f['category']}")
+                parts.append(f"  Etiketler: {tags_str}")
+                parts.append(f"  Fiyat: {f['price']} TL")
+                parts.append(
+                    f"  Getiriler: 1G %{f['return_1d'] or '-'} | "
+                    f"1A %{f['return_1m'] or '-'} | "
+                    f"3A %{f['return_3m'] or '-'} | "
+                    f"1Y %{f['return_1y'] or '-'}"
+                )
+                parts.append("")
+        else:
+            parts.append("### İLGİLİ FONLAR")
+            for f in funds:
+                tags_list = f.get("asset_tags") or []
+                tags_str = ", ".join(tags_list) if tags_list else "-"
+                parts.append(
+                    f"- {f['code']} | {f['name'][:40]} | Kategori: {f['category']} | "
+                    f"Etiketler: {tags_str} | "
+                    f"Fiyat: {f['price']} TL | "
+                    f"1G: %{f['return_1d'] or '-'} | 1A: %{f['return_1m'] or '-'} | "
+                    f"3A: %{f['return_3m'] or '-'} | 1Y: %{f['return_1y'] or '-'}"
+                )
+            parts.append("")
 
     repos = context.get("repo_rates", [])
     if repos:

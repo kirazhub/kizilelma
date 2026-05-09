@@ -134,6 +134,22 @@ class NewsRecord(SQLModel, table=True):
     summary: Optional[str] = None
 
 
+class FundPriceRecord(SQLModel, table=True):
+    """Bir fonun belirli bir gündeki fiyatı (geçmiş veri için).
+
+    TEFAS'tan toplanan günlük fiyat geçmişini saklar.
+    Snapshot'a bağlı DEĞİL — saf zaman serisi.
+    """
+
+    __tablename__ = "fund_prices"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(index=True)  # Fon kodu (AFA, ANK vs)
+    name: str  # Fon adı (kısaltılmış)
+    price: float  # Birim pay fiyatı
+    date: dt.date = Field(index=True)  # Tarih
+
+
 class MacroRecord(SQLModel, table=True):
     """Makro veri kaydı (döviz, altın, BIST, emtia).
 

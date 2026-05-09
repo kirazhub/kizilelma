@@ -309,7 +309,12 @@ def retrieve_context(question: str, engine=None) -> dict:
                             "name": m.get("name", ""),
                             "value": float(m.get("value", 0)),
                             "currency": m.get("currency", "TRY"),
-                            "change_pct": float(m["change_pct"]) if m.get("change_pct") else None,
+                            # change_pct == 0.0 falsy olabilir; "is not None" kullan
+                            "change_pct": (
+                                float(m["change_pct"])
+                                if m.get("change_pct") is not None
+                                else None
+                            ),
                             "category": m.get("category", ""),
                             "date": m.get("date", ""),
                         }
@@ -346,11 +351,37 @@ def _fund_to_dict(f: FundRecord) -> dict:
 
 
 def format_context_for_prompt(context: dict) -> str:
-    """Context'i AI prompt'una uygun okunabilir metne çevir."""
+    """Context'i AI prompt'una uygun okunabilir metne çevir.
+
+    NOT: Makro veriler (Dolar, Euro, Altın, BIST, Brent) en üste konuyor;
+    çünkü AI'ın bunları "elimde veri yok" diye atlamasına karşı en görünür
+    yere koymak istiyoruz. Bölüm başlığı CANLI işaretiyle vurgulanıyor.
+    """
     parts = []
 
     if context.get("latest_snapshot"):
         parts.append(f"En son veri tarihi: {context['latest_snapshot']}\n")
+
+    # ---- MAKRO VERİLER (her zaman ilk sırada, en görünür yerde) ----
+    macros = context.get("macro_data", [])
+    if macros:
+        parts.append("### MAKRO VERİLER — CANLI (Döviz, Altın, BIST, Emtia)")
+        parts.append(
+            "Aşağıdaki rakamlar GERÇEK ve GÜNCEL. Kullanıcı dolar, euro, "
+            "altın, BIST, petrol sorduğunda BU rakamları kullan. "
+            '"Elimde veri yok" deme — veri burada.'
+        )
+        for m in macros:
+            cur = "TL" if m.get("currency") == "TRY" else m.get("currency", "")
+            change_str = ""
+            if m.get("change_pct") is not None:
+                sign = "+" if m["change_pct"] >= 0 else ""
+                change_str = f" ({sign}%{m['change_pct']:.2f} günlük)"
+            parts.append(
+                f"- {m.get('name', m.get('symbol', '?'))}: "
+                f"{m.get('value')} {cur}{change_str}"
+            )
+        parts.append("")
 
     funds = context.get("funds", [])
     if funds:
@@ -375,16 +406,7 @@ def format_context_for_prompt(context: dict) -> str:
         parts.append("")
 
     macros = context.get("macro_data", [])
-    if macros:
-        parts.append("### MAKRO VERİLER (Döviz, Altın, BIST, Emtia)")
-        for m in macros:
-            cur = "TL" if m["currency"] == "TRY" else m["currency"]
-            change_str = ""
-            if m.get("change_pct") is not None:
-                sign = "+" if m["change_pct"] >= 0 else ""
-                change_str = f" ({sign}%{m['change_pct']:.2f})"
-            parts.append(f"- {m['name']}: {m['value']} {cur}{change_str}")
-        parts.append("")
+    # Makro veriler en üstte zaten yazıldı (yukarıda); burada tekrar yazma.
 
     bonds = context.get("bonds", [])
     if bonds:

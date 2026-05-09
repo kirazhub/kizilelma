@@ -50,24 +50,31 @@ VERİ KULLANIMI:
 - Sadece sana verilen context'teki gerçek rakamları kullan, UYDURMA
 - Context'te olmayan bilgiyi "emin değilim" veya "elimde veri yok" diye belirt
 - Ama bunu soğuk değil, "hmm bu konuda elimde net bilgi yok" gibi doğal söyle
+- ÖNEMLİ İSTİSNA: Eğer context'te "### MAKRO VERİLER" bölümü varsa, dolar,
+  euro, altın, BIST, petrol soruları için ASLA "elimde veri yok" deme.
+  O bölümdeki rakamlar canlıdır ve ANINDA kullanılmalı.
 
 MAKRO EKONOMİK VERİLER:
-Sana verilen context'te artık makro veriler de olabilir:
-- USD/TRY ve EUR/TRY kurları
-- Gram altın (TL) ve ons altın (USD) fiyatları
-- BIST 100 ve BIST 30 endeksleri
+Context'in en üstünde "### MAKRO VERİLER — CANLI" başlığı altında şu veriler
+gelir (her zaman):
+- Dolar (USD/TRY) ve Euro (EUR/TRY) kurları
+- Gram altın (TL) ve ons altın (USD)
+- BIST 100 endeksi
 - Brent petrol fiyatı (USD)
 
-Kullanıcı şunlardan birini sorarsa bu verileri kullan:
-- "Dolar nasıl?", "Dolar kaç oldu?" → USD/TRY değerini söyle, gerekirse euro'yla kıyasla
-- "Altın yükseldi mi?", "Gram altın?" → Gram altın fiyatını yorumla
-- "Borsa nasıl?", "BIST?" → BIST 100 değerini söyle
-- "Yatırım önerin?" → Makro tabloyu da hesaba kat (yüksek dolar = enflasyon
-  riski, altın güvenli liman olabilir, BIST düşükse hisse fonu fırsat olabilir vs.)
+Kullanıcının sorusuna göre:
+- "Dolar nasıl?", "Dolar kaç oldu?", "USD ne kadar?" → MAKRO bölümündeki
+  Dolar rakamını söyle. Gerekirse euro ile kıyasla.
+- "Altın yükseldi mi?", "Gram altın?", "Ons altın?" → MAKRO bölümündeki
+  altın rakamlarını yorumla.
+- "Borsa nasıl?", "BIST?", "Endeks?" → BIST 100 değerini söyle.
+- "Petrol?", "Brent?" → Brent fiyatını söyle.
+- "Yatırım önerin?" → Makro tabloyu hesaba kat (yüksek dolar = enflasyon
+  riski, altın güvenli liman olabilir, BIST düşükse hisse fonu fırsat).
 
 Bu verileri sohbet içinde DOĞAL şekilde kullan, ham liste verme. Mesela:
-"Dolar bugün 39.50 civarında, euro biraz daha yukarıda 42.80'de. Altının
-gramı da 4500 lirayı geçmiş, son dönemde gerçekten değer kazanıyor."
+"Dolar bugün 45.35 civarında, euro biraz daha yukarıda 53.50'de. Altının
+gramı da 6875 lirayı geçmiş, son dönemde gerçekten değer kazanıyor."
 
 ETİKETLER (Yeni!):
 Her fonun yanında "Etiketler" satırı var. Bu etiketler fonun ne tür olduğunu
@@ -150,7 +157,12 @@ async def stream_chat_response(
                                 "name": m.get("name", ""),
                                 "value": float(m.get("value", 0)),
                                 "currency": m.get("currency", "TRY"),
-                                "change_pct": float(m["change_pct"]) if m.get("change_pct") else None,
+                                # change_pct == 0.0 falsy → "is not None" lazım
+                                "change_pct": (
+                                    float(m["change_pct"])
+                                    if m.get("change_pct") is not None
+                                    else None
+                                ),
                                 "category": m.get("category", ""),
                                 "date": m.get("date", ""),
                             }
@@ -184,6 +196,12 @@ async def stream_chat_response(
                     logger.warning(f"Macro canli fetch hatasi: {fetch_exc}")
         
         context_text = format_context_for_prompt(context)
+        logger.info(
+            f"Chat context hazirlandi: funds={len(context.get('funds', []))}, "
+            f"macros={len(context.get('macro_data', []))}, "
+            f"repos={len(context.get('repo_rates', []))}, "
+            f"prompt_chars={len(context_text)}"
+        )
     except Exception as exc:
         logger.error(f"Context retrieval hatası: {exc}")
         context_text = "Veri alınamadı."
@@ -200,7 +218,9 @@ async def stream_chat_response(
 
     # Şimdiki soru + context
     # Context'i user mesajına değil, system içine saklayarak daha doğal konuşma
-    user_content = f"""Güncel piyasa verilerim (cevabında kullan ama liste halinde listeleme, doğal anlat):
+    user_content = f"""Aşağıda sana güncel piyasa verilerim var. İçinde
+"### MAKRO VERİLER — CANLI" bölümü varsa, oradaki dolar/euro/altın/BIST/petrol
+rakamları GERÇEKTİR ve sorulduğunda kullanılmalıdır:
 
 {context_text}
 
@@ -208,7 +228,8 @@ async def stream_chat_response(
 
 Kullanıcının sorusu: {message}
 
-Hatırlatma: Arkadaş sohbeti gibi, akıcı paragraflar halinde cevap ver. Liste yapma!"""
+Hatırlatma: Cevabın akıcı bir paragraf olsun, bullet point listesi olarak
+çıkma. Ama context'teki rakamları doğal cümlenin içinde MUTLAKA kullan."""
 
     messages.append({"role": "user", "content": user_content})
 

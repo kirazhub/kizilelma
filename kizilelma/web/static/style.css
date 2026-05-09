@@ -284,32 +284,47 @@ body::after {
 }
 
 /* ==========================================================================
-   Grid — 6 panel layout (3x2)
+   Grid — 2 kolon layout (sol: fonlar | sağ: zirveler + tcmb + log)
    ========================================================================== */
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: 1fr 1fr;
+  grid-template-columns: 1.35fr 1fr;
   gap: var(--panel-gap);
   height: calc(100vh - var(--header-h) - var(--status-h));
   background: var(--border);
   overflow: hidden;
 }
 
+/* Sağ kolon: 3 panel alt alta */
+.right-column {
+  display: grid;
+  grid-template-rows: 2.2fr 0.9fr 0.9fr;
+  gap: var(--panel-gap);
+  background: var(--border);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.right-column .panel {
+  min-height: 0;
+}
+
 @media (max-width: 1200px) {
   .grid {
-    grid-template-columns: repeat(2, 1fr);
-    grid-template-rows: repeat(3, 1fr);
+    grid-template-columns: 1.2fr 1fr;
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
   html, body { overflow: auto; }
   .grid {
     grid-template-columns: 1fr;
-    grid-template-rows: none;
     height: auto;
+  }
+  .right-column {
+    grid-template-rows: none;
+    grid-auto-rows: minmax(260px, auto);
   }
   .panel { min-height: 360px; }
 }
@@ -455,6 +470,59 @@ body::after {
 }
 .panel-body::-webkit-scrollbar-thumb:hover {
   background: var(--accent-amber);
+}
+
+/* ==========================================================================
+   Fon kategorileri — TEFAS FONLARI panelinde kullanılır
+   Her kategori başlık + tablo; panel aşağı kadar dolu dolu akar.
+   ========================================================================== */
+
+.fund-category {
+  padding: 0 0 6px 0;
+  margin: 0;
+}
+
+.fund-category + .fund-category {
+  margin-top: 10px;
+}
+
+.fund-category-title {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--accent-amber);
+  margin: 0;
+  padding: 8px 14px;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 140, 0, 0.10),
+    rgba(255, 140, 0, 0.02)
+  );
+  border-top: 1px solid rgba(255, 140, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 140, 0, 0.18);
+}
+
+.fund-category-title .cat-emoji {
+  font-size: 13px;
+  filter: grayscale(0.1);
+}
+
+.fund-category-title .cat-count {
+  margin-left: auto;
+  font-size: 9.5px;
+  color: var(--text-dim, #8a7a5a);
+  letter-spacing: 0.08em;
+}
+
+.fund-category:first-child .fund-category-title {
+  border-top: none;
 }
 
 /* ==========================================================================

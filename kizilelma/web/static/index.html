@@ -13,7 +13,7 @@
     rel="stylesheet"
   />
 
-  <link rel="stylesheet" href="/static/style.css?v=3" />
+  <link rel="stylesheet" href="/static/style.css?v=4" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🍎%3C/text%3E%3C/svg%3E" />
 </head>
 <body>
@@ -82,15 +82,15 @@
 
   <main class="grid">
 
-    <!-- PANEL 1: Para Piyasası Fonları -->
+    <!-- SOL KOLON: TEFAS FONLARI — tüm kategoriler, tam yükseklik -->
     <section class="panel" data-panel="funds" data-key="1">
       <header class="panel-header">
         <h2>
           <span class="panel-num">01</span>
-          PARA PİYASASI FONLARI
+          TEFAS FONLARI
         </h2>
         <div class="panel-meta">
-          <span class="panel-badge">TOP 10</span>
+          <span class="panel-badge">TÜM KATEGORİLER</span>
           <span class="panel-hint">[1]</span>
         </div>
       </header>
@@ -101,98 +101,65 @@
       </div>
     </section>
 
-    <!-- PANEL 2: Tahvil / Sukuk -->
-    <section class="panel" data-panel="bonds" data-key="2">
-      <header class="panel-header">
-        <h2>
-          <span class="panel-num">02</span>
-          TAHVİL &amp; SUKUK
-        </h2>
-        <div class="panel-meta">
-          <span class="panel-badge">BIST</span>
-          <span class="panel-hint">[2]</span>
-        </div>
-      </header>
-      <div class="panel-body" id="panel-bonds-body">
-        <div class="loading">
-          <span class="blink">▊</span> VERİ ÇEKİLİYOR<span class="dots"></span>
-        </div>
-      </div>
-    </section>
+    <!-- SAĞ KOLON: 3 panel alt alta -->
+    <div class="right-column">
 
-    <!-- PANEL 3: TCMB Faiz -->
-    <section class="panel panel-sm" data-panel="repo" data-key="3">
-      <header class="panel-header">
-        <h2>
-          <span class="panel-num">03</span>
-          TCMB FAİZ
-        </h2>
-        <div class="panel-meta">
-          <span class="panel-badge">GÜNCEL</span>
-          <span class="panel-hint">[3]</span>
+      <!-- Günün Zirveleri (EN BÜYÜK) -->
+      <section class="panel" data-panel="top" data-key="2">
+        <header class="panel-header">
+          <h2>
+            <span class="panel-num">02</span>
+            GÜNÜN ZİRVELERİ
+          </h2>
+          <div class="panel-meta">
+            <span class="panel-badge">TOP 25</span>
+            <span class="panel-hint">[2]</span>
+          </div>
+        </header>
+        <div class="panel-body" id="panel-top-body">
+          <div class="loading">
+            <span class="blink">▊</span> VERİ ÇEKİLİYOR<span class="dots"></span>
+          </div>
         </div>
-      </header>
-      <div class="panel-body" id="panel-repo-body">
-        <div class="loading">
-          <span class="blink">▊</span> VERİ ÇEKİLİYOR<span class="dots"></span>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- PANEL 4: Eurobond -->
-    <section class="panel" data-panel="eurobond" data-key="4">
-      <header class="panel-header">
-        <h2>
-          <span class="panel-num">04</span>
-          EUROBOND
-        </h2>
-        <div class="panel-meta">
-          <span class="panel-badge">USD/EUR</span>
-          <span class="panel-hint">[4]</span>
+      <!-- TCMB Faiz (KÜÇÜK) -->
+      <section class="panel panel-sm" data-panel="repo" data-key="3">
+        <header class="panel-header">
+          <h2>
+            <span class="panel-num">03</span>
+            TCMB FAİZ
+          </h2>
+          <div class="panel-meta">
+            <span class="panel-badge">GÜNCEL</span>
+            <span class="panel-hint">[3]</span>
+          </div>
+        </header>
+        <div class="panel-body" id="panel-repo-body">
+          <div class="loading">
+            <span class="blink">▊</span> VERİ ÇEKİLİYOR<span class="dots"></span>
+          </div>
         </div>
-      </header>
-      <div class="panel-body" id="panel-eurobond-body">
-        <div class="loading">
-          <span class="blink">▊</span> VERİ ÇEKİLİYOR<span class="dots"></span>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- PANEL 5: Günün Zirveleri -->
-    <section class="panel" data-panel="top" data-key="5">
-      <header class="panel-header">
-        <h2>
-          <span class="panel-num">05</span>
-          GÜNÜN ZİRVELERİ
-        </h2>
-        <div class="panel-meta">
-          <span class="panel-badge">1Y BEST</span>
-          <span class="panel-hint">[5]</span>
+      <!-- Canlı Log (KÜÇÜK) -->
+      <section class="panel panel-sm" data-panel="log" data-key="4">
+        <header class="panel-header">
+          <h2>
+            <span class="panel-num">04</span>
+            SİSTEM LOGU
+          </h2>
+          <div class="panel-meta">
+            <span class="panel-badge">LIVE</span>
+            <span class="panel-hint">[4]</span>
+          </div>
+        </header>
+        <div class="panel-body">
+          <ul class="log-feed" id="log-feed"></ul>
         </div>
-      </header>
-      <div class="panel-body" id="panel-top-body">
-        <div class="loading">
-          <span class="blink">▊</span> VERİ ÇEKİLİYOR<span class="dots"></span>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- PANEL 6: Canlı Log -->
-    <section class="panel panel-sm" data-panel="log" data-key="6">
-      <header class="panel-header">
-        <h2>
-          <span class="panel-num">06</span>
-          SİSTEM LOGU
-        </h2>
-        <div class="panel-meta">
-          <span class="panel-badge">LIVE</span>
-          <span class="panel-hint">[6]</span>
-        </div>
-      </header>
-      <div class="panel-body">
-        <ul class="log-feed" id="log-feed"></ul>
-      </div>
-    </section>
+    </div>
 
   </main>
 
@@ -220,7 +187,7 @@
     <span class="status-segment help">
       <span class="kbd">R</span> refresh
       <span class="kbd">/</span> search
-      <span class="kbd">1-6</span> focus
+      <span class="kbd">1-4</span> focus
     </span>
   </footer>
 
@@ -298,6 +265,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=3" defer></script>
+  <script src="/static/app.js?v=4" defer></script>
 </body>
 </html>

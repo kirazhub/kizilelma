@@ -1,439 +1,408 @@
-"""AI Chat endpoint — Claude Haiku ile RAG (sohbet modu)."""
-import asyncio
+"""Kızılelma AI Chat — basit, garantili çalışan tek dosyalı modül.
+
+Üç fonksiyon, anlaşılması kolay:
+    1. get_context(message)        → veriyi DB'den topla (tek yerden)
+    2. build_prompt(ctx, msg, hist) → context'i Claude prompt'una çevir
+    3. stream_response(msg, hist)   → Claude'dan canlı (streaming) cevap
+
+FastAPI bağlantısı:
+    chat_endpoint(ChatRequest) → SSE StreamingResponse
+"""
+from __future__ import annotations
+
 import json
 import logging
 import os
+import re
 from typing import AsyncGenerator
 
 import anthropic
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlmodel import Session, select
 
-from kizilelma.agent.retriever import retrieve_context, format_context_for_prompt
+from kizilelma.storage.db import get_engine
+from kizilelma.storage.models import (
+    FundRecord,
+    MacroRecord,
+    RepoRecord,
+    SnapshotRecord,
+)
 
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Claude ayarları
+# ---------------------------------------------------------------------------
 CLAUDE_MODEL = "claude-haiku-4-5"
-MAX_TOKENS = 800  # Daha uzun, akıcı cevap için
-TEMPERATURE = 0.8  # Daha yaratıcı, insan gibi konuşma için
+MAX_TOKENS = 800
+TEMPERATURE = 0.8
 
-SYSTEM_PROMPT = """Sen "Kızıl Elma" adında, Türkiye finansal piyasaları hakkında bilgili,
-sıcak ve arkadaş canlısı bir sohbet partnerisin. Sana bir arkadaşın gibi davranıyor,
-sen de ona piyasadan bahsediyorsun.
+# Türkçe büyük harfli kelimeler bazen 2-4 karakterli oluyor; bunlar fon kodu
+# DEĞİLDİR ama regex'e takılır → context'e yanlış fon eklemeyelim diye filtre.
+STOP_WORDS = {
+    "TCMB", "BIST", "USD", "EUR", "TL", "AI", "YTL",
+    "KDV", "NE", "EN", "AB", "ABD", "PARA", "BU", "NE",
+    "VE", "DA", "DE", "Kİ", "MI", "MU",
+}
+
+
+# ===========================================================================
+# 1. CONTEXT TOPLAMA — Tüm veriyi tek yerden, garantili al
+# ===========================================================================
+
+def get_context(message: str) -> dict:
+    """Soruya göre gerekli veriyi DB'den topla.
+
+    HER ZAMAN aşağıdaki anahtarlarla bir dict döner:
+        - macro_data       : USD, EUR, altın, BIST, petrol, vs.
+        - funds            : Soruyla ilgili fonlar (kod geçiyorsa onlar, yoksa top 5)
+        - repo_rates       : TCMB faiz oranları
+        - latest_snapshot  : En son snapshot zamanı (ISO string) ya da None
+    """
+    context: dict = {
+        "macro_data": [],
+        "funds": [],
+        "repo_rates": [],
+        "latest_snapshot": None,
+    }
+
+    engine = get_engine()
+    with Session(engine) as session:
+        # --- En son DOLU snapshot'ı bul ---------------------------------------
+        # Bazen en son snapshot tamamen boş kalabilir (collector hatası vs).
+        # Bu yüzden "makro veya fon içeren" en son snapshot'ı arıyoruz.
+        last_macro = session.exec(
+            select(MacroRecord).order_by(MacroRecord.snapshot_id.desc()).limit(1)
+        ).first()
+        last_fund = session.exec(
+            select(FundRecord).order_by(FundRecord.snapshot_id.desc()).limit(1)
+        ).first()
+
+        candidate_snap_ids: list[int] = []
+        if last_macro:
+            candidate_snap_ids.append(last_macro.snapshot_id)
+        if last_fund:
+            candidate_snap_ids.append(last_fund.snapshot_id)
+
+        if not candidate_snap_ids:
+            # DB tamamen boşsa boş context dön
+            return context
+
+        snap_id = max(candidate_snap_ids)
+        latest_snap = session.get(SnapshotRecord, snap_id)
+        if latest_snap:
+            context["latest_snapshot"] = latest_snap.timestamp.isoformat()
+        # --- MAKRO VERİLER ----------------------------------------------------
+        # Strateji: Her sembolün EN SON kaydını al.
+        # Tek snapshot'a bakmıyoruz çünkü bazen bir snapshot eksik kalır
+        # (örn: yfinance hata verir, sadece bir kısmı kaydedilir).
+        # Distinct sembolleri çekip her biri için en son kaydı topluyoruz.
+        all_symbols = list(
+            session.exec(select(MacroRecord.symbol).distinct()).all()
+        )
+        macros: list[MacroRecord] = []
+        for sym in all_symbols:
+            latest_for_sym = session.exec(
+                select(MacroRecord)
+                .where(MacroRecord.symbol == sym)
+                .order_by(MacroRecord.id.desc())
+                .limit(1)
+            ).first()
+            if latest_for_sym:
+                macros.append(latest_for_sym)
+
+        # Önemli sembolleri başa al (USDTRY, EURTRY, GOLD, BIST, BRENT)
+        priority_order = {
+            "USDTRY": 0, "EURTRY": 1, "GOLD_OZ": 2,
+            "BIST100": 3, "BRENT": 4,
+        }
+        macros.sort(key=lambda m: priority_order.get(m.symbol, 99))
+
+        context["macro_data"] = [
+            {
+                "symbol": m.symbol,
+                "name": m.name,
+                "value": float(m.value),
+                "currency": m.currency,
+                "category": m.category,
+                "date": m.date.isoformat() if m.date else "",
+            }
+            for m in macros
+        ]
+
+        # latest_snapshot'ı gerçek veri tarihinden hesapla
+        # (snapshot.timestamp ile makro.date farklı olabiliyor)
+        all_dates = [m.date for m in macros if m.date]
+        if all_dates:
+            most_recent = max(all_dates)
+            context["latest_snapshot"] = most_recent.isoformat()
+
+        # --- REPO / TCMB FAİZ -------------------------------------------------
+        repo_stmt = select(RepoRecord).where(RepoRecord.snapshot_id == snap_id)
+        repos = list(session.exec(repo_stmt))
+        if not repos:
+            # Repo içeren en son snapshot'a düş
+            last_repo = session.exec(
+                select(RepoRecord).order_by(RepoRecord.snapshot_id.desc()).limit(1)
+            ).first()
+            if last_repo:
+                repos = list(
+                    session.exec(
+                        select(RepoRecord).where(
+                            RepoRecord.snapshot_id == last_repo.snapshot_id
+                        )
+                    )
+                )
+
+        context["repo_rates"] = [
+            {
+                "type": r.type,
+                "maturity": r.maturity,
+                "rate": float(r.rate),
+                "date": r.date.isoformat() if r.date else "",
+            }
+            for r in repos
+        ]
+
+        # --- FONLAR -----------------------------------------------------------
+        # Soruda fon kodu var mı? (2-4 büyük harf ardışık)
+        candidate_codes = re.findall(r"\b[A-Z]{2,4}\b", message)
+        fund_codes = [c for c in candidate_codes if c not in STOP_WORDS]
+
+        if fund_codes:
+            # Belirli fonları getir (en son fiyat)
+            funds: list[FundRecord] = []
+            for code in fund_codes[:5]:
+                stmt = (
+                    select(FundRecord)
+                    .where(FundRecord.code == code)
+                    .order_by(FundRecord.snapshot_id.desc())
+                    .limit(1)
+                )
+                fund = session.exec(stmt).first()
+                if fund:
+                    funds.append(fund)
+            context["funds"] = [_fund_dict(f) for f in funds]
+        else:
+            # Genel: en yüksek 1Y getirili 5 fon
+            # Fon içeren en son snapshot'ı kullan (snap_id boş olabilir)
+            fund_snap_id = last_fund.snapshot_id if last_fund else snap_id
+            stmt = (
+                select(FundRecord)
+                .where(FundRecord.snapshot_id == fund_snap_id)
+                .where(FundRecord.return_1y > 0)
+                .order_by(FundRecord.return_1y.desc())
+                .limit(5)
+            )
+            top_funds = list(session.exec(stmt))
+            context["funds"] = [_fund_dict(f) for f in top_funds]
+
+    return context
+
+
+def _fund_dict(f: FundRecord) -> dict:
+    """FundRecord'u JSON'a uygun dict'e çevir."""
+    return {
+        "code": f.code,
+        "name": f.name,
+        "category": f.category or "",
+        "price": float(f.price) if f.price else 0.0,
+        "return_1d": float(f.return_1d) if f.return_1d is not None else None,
+        "return_1m": float(f.return_1m) if f.return_1m is not None else None,
+        "return_1y": float(f.return_1y) if f.return_1y is not None else None,
+        "date": f.date.isoformat() if f.date else "",
+    }
+
+
+# ===========================================================================
+# 2. PROMPT OLUŞTURMA
+# ===========================================================================
+
+SYSTEM_PROMPT = """Sen "Kızıl Elma" adında, Türkiye finansal piyasaları konusunda bilgili,
+samimi ve arkadaş canlısı bir AI asistansın.
 
 KONUŞMA TARZIN:
-- Samimi ve akıcı konuş — sanki kahve içerken arkadaşınla sohbet ediyormuşsun gibi
-- Liste veya tablo YAPMA! Paragraflar halinde, sohbet eder gibi anlat
-- "Bak şöyle anlatayım...", "Aslında...", "Mesela...", "Şunu da eklemek isterim..." gibi
-  bağlaçlar kullan
-- Rakamları metnin içine doğal biçimde yerleştir, bullet point olarak değil
-- Açıklama yaparken nedenini de söyle — "çünkü...", "bu yüzden...", "demek oluyor ki..."
-- Duygusal ton kullan — "gözünüze ilişsin", "dikkat çekici", "şaşırtıcı bir şey var"
-- Gerektiğinde emoji kullan ama abartma (bir cevapta 2-3 emoji max)
-- Kullanıcının yaşına/profiline göre dil seviyesini ayarla (resmi değil, samimi)
+- Kahve içerken arkadaşına anlatır gibi sıcak, akıcı konuş
+- Liste, tablo veya bullet point YAPMA — paragraflar halinde
+- "Bak", "şöyle anlatayım", "aslında" gibi doğal bağlaçlar kullan
+- Rakamları metnin içine yerleştir, doğal akışta
+- 3-6 cümle arası, kısa ama dolu
 
-NE YAPMA:
-- Kuru madde madde liste
-- "1. ... 2. ... 3. ..." formatı
-- Tablo
-- "İşte analiz:" gibi soğuk başlıklar
-- Çok fazla teknik jargon
+VERİ KULLANIMI - KRİTİK:
+- Sana her seferinde GÜNCEL VERİLER verilecek (dolar, altın, BIST, repo, fonlar)
+- Bu veriler GERÇEKTİR ve GÜNCELDİR
+- ASLA "elimde veri yok", "veri çekemedim" deme - veriler context'te VAR
+- Eğer kullanıcı bir konuyu soruyorsa, context'teki ilgili rakamı kullan
+- Veride olmayan bir şey sorulursa "elimde tam o bilgi yok ama şunu söyleyebilirim" de
 
-NE YAP:
-- "Bak, bu fon son 1 yılda %52 kazandırmış — oldukça iyi bir rakam bu aslında."
-- "Şöyle düşün: Eğer geçen yıl 100 bin lira koysaydın, şimdi 152 bin liran olurdu."
-- "Şimdi sana ilginç bir şey söyleyeyim..."
-- "Aslında bu sektörde dikkat çekici bir hareketlilik var, özellikle..."
+YASAL UYARI:
+- Cevabın bir yerinde doğal şekilde "tabii bu yatırım tavsiyesi değil, bilgi" diye hatırlat
+- Ama her cümlede deme - sohbet doğal olsun
 
-VERİ KULLANIMI:
-- Sadece sana verilen context'teki gerçek rakamları kullan, UYDURMA
-- Context'te olmayan bilgiyi "emin değilim" veya "elimde veri yok" diye belirt
-- Ama bunu soğuk değil, "hmm bu konuda elimde net bilgi yok" gibi doğal söyle
-- ÖNEMLİ İSTİSNA: Eğer context'te "### MAKRO VERİLER" bölümü varsa, dolar,
-  euro, altın, BIST, petrol soruları için ASLA "elimde veri yok" deme.
-  O bölümdeki rakamlar canlıdır ve ANINDA kullanılmalı.
+ÖRNEK:
 
-MAKRO EKONOMİK VERİLER:
-Context'in en üstünde "### MAKRO VERİLER — CANLI" başlığı altında şu veriler
-gelir (her zaman):
-- Dolar (USD/TRY) ve Euro (EUR/TRY) kurları
-- Gram altın (TL) ve ons altın (USD)
-- BIST 100 endeksi
-- Brent petrol fiyatı (USD)
+Kullanıcı: "Dolar kuru ne?"
 
-Kullanıcının sorusuna göre:
-- "Dolar nasıl?", "Dolar kaç oldu?", "USD ne kadar?" → MAKRO bölümündeki
-  Dolar rakamını söyle. Gerekirse euro ile kıyasla.
-- "Altın yükseldi mi?", "Gram altın?", "Ons altın?" → MAKRO bölümündeki
-  altın rakamlarını yorumla.
-- "Borsa nasıl?", "BIST?", "Endeks?" → BIST 100 değerini söyle.
-- "Petrol?", "Brent?" → Brent fiyatını söyle.
-- "Yatırım önerin?" → Makro tabloyu hesaba kat (yüksek dolar = enflasyon
-  riski, altın güvenli liman olabilir, BIST düşükse hisse fonu fırsat).
+DOĞRU CEVAP:
+"Dolar şu an 45.35 TL civarında, son dönemde dolar TL karşısında değer kazanmaya devam ediyor.
+Geçen yıla göre baktığımızda, bu artış yaklaşık %35-40 seviyesinde - enflasyondan da fazla yani.
+Bu durum altın gibi alternatif yatırım araçlarının ilginç olduğunu gösteriyor.
+Tabii bunlar yorum, kesin yatırım tavsiyesi değil."
 
-Bu verileri sohbet içinde DOĞAL şekilde kullan, ham liste verme. Mesela:
-"Dolar bugün 45.35 civarında, euro biraz daha yukarıda 53.50'de. Altının
-gramı da 6875 lirayı geçmiş, son dönemde gerçekten değer kazanıyor."
-
-ETİKETLER (Yeni!):
-Her fonun yanında "Etiketler" satırı var. Bu etiketler fonun ne tür olduğunu
-söyler:
-- Sektör: Banka, Teknoloji, Sağlık, Enerji, Otomotiv, Sanayi, ...
-- Varlık türü: Hisse, Tahvil, Para Piyasası, Altın, Eurobond, Sukuk, Döviz, ...
-- Coğrafya: Yurtiçi, Yurtdışı, ABD, Avrupa, Asya, Global, ...
-- Tema: BIST30, BIST100, Endeks, Faizsiz, Serbest, Emeklilik, ESG, ...
-
-Kullanıcı "banka sektörü nasıl?" derse, etiketinde "Banka" geçen fonları
-öne çıkar; "teknoloji fonları geride mi?" derse "Teknoloji" etiketli fonların
-ortalama getirisinden bahset. Etiketleri doğal cümlenin içinde kullan, asla
-liste olarak okuma.
-
-YASAL:
-- Cevabın sonunda veya arasında doğal bir yerde şunu hatırlat:
-  "tabii bunlar yatırım tavsiyesi değil, sadece bilgilendirme"
-- Ama bunu resmi değil, doğal bir şekilde söyle
-
-UZUNLUK:
-- 4-8 cümle arası, akıcı bir paragraf
-- Gerekirse 2 paragraf olabilir
-- Kısa tek cümleyle kaçma, ama uzun tekrarlardan da kaçın
-
-ÖRNEK KONUŞMA:
-
-Soru: "ANK fonu nasıl?"
-
-İYİ CEVAP:
-"ANK fonuna bakıyorum da, aslında para piyasası fonları arasında epey iyi
-bir performans göstermiş son bir yılda — tam %52.6 getiri sağlamış yani.
-Fiyatı şu an 0.33 TL civarında, ama işin güzel yanı son bir haftada bile
-stabil bir yukarı trendde duruyor. Bu tip para piyasası fonları genelde
-risksiz sayılır zaten, nakit yatırımına yakın bir enstrüman. Tabii bunlar
-bilgilendirme amaçlı, yatırım tavsiyesi değil — ama ANK şu an gerçekten
-kategorisinde öne çıkanlardan."
-
-KÖTÜ CEVAP (YAPMA):
-"ANK Fonu Analizi:
-- Tür: Para Piyasası Fonu
-- 1 Yıllık Getiri: %52.64
-- Fiyat: 0.3259 TL
-- Performans: Yüksek
-Sonuç: İyi bir fon."
+YANLIŞ CEVAP (YAPMA):
+"USDTRY: 45.3532 TL
+Bu rakam dolar/TL karşılaştırmasıdır.
+- Yıllık değişim: %35
+- Trend: Yukarı"
 """
 
 
-EK_YETENEKLER = """
+def build_prompt(
+    context: dict,
+    message: str,
+    history: list[dict],
+) -> tuple[str, list[dict]]:
+    """Context + geçmiş + yeni mesaj → Claude'un beklediği formata çevir.
 
-GELİŞMİŞ ANALİZ YETENEKLERİN:
+    Returns:
+        (system_prompt, messages_list)
+    """
+    lines: list[str] = ["📊 GÜNCEL PİYASA VERİLERİ (Bunları kullan!):", ""]
 
-1. KARŞILAŞTIRMA YAPABİLİRSİN:
-   "ANK ile AFA farkı?" → İki fonu karşılaştır:
-   - Getirileri yan yana
-   - Risk seviyeleri
-   - Hangi tarafa yatırım kim için ideal
+    # Tarih
+    if context.get("latest_snapshot"):
+        lines.append(f"Son veri: {context['latest_snapshot'][:10]}")
+        lines.append("")
 
-2. SEKTÖR ANALİZİ:
-   Her fonun "Etiketler" alanında sektör/varlık bilgisi var (Banka, Teknoloji, Hisse, Altın, vs.)
-   "Banka sektörü güçlü mü?" → Etiketinde 'Banka' geçen fonların ortalama getirisini hesapla
-   "Altın iyi mi?" → 'Altın' etiketli fonlar + makro altın fiyatı
+    # Makro
+    macros = context.get("macro_data") or []
+    if macros:
+        lines.append("💰 DÖVİZ, ALTIN, BORSA, EMTİA:")
+        for m in macros:
+            currency_raw = m.get("currency", "") or ""
+            currency = "TL" if currency_raw == "TRY" else currency_raw
+            value = m.get("value", 0) or 0
+            if value >= 1000:
+                value_str = f"{value:,.2f}"
+            else:
+                value_str = f"{value:.4f}"
+            lines.append(f"  - {m.get('name')}: {value_str} {currency}".rstrip())
+        lines.append("")
 
-3. RİSK DEĞERLENDİRME:
-   - Para Piyasası fonları: Düşük risk, sabit getiri (mevduat alternatifi)
-   - Hisse fonları: Yüksek risk, yüksek getiri potansiyeli
-   - Karma fonlar: Orta risk
-   - Eurobond: Döviz riski + ülke riski
-   - 1Y getiri yüksekse + volatilite yüksek → riskli
+    # Repo / TCMB
+    repos = context.get("repo_rates") or []
+    if repos:
+        lines.append("🏦 TCMB FAİZ ORANLARI:")
+        for r in repos:
+            lines.append(
+                f"  - {r.get('type')} ({r.get('maturity')}): %{r.get('rate')}"
+            )
+        lines.append("")
 
-4. TREND ANALİZİ:
-   - 1G pozitif + 1A pozitif + 1Y pozitif → Güçlü uptrend
-   - 1G negatif ama 1Y pozitif → Kısa vadeli düzeltme
-   - 1G + 1A + 1Y hepsi negatif → Düşüş trendi
+    # Fonlar
+    funds = context.get("funds") or []
+    if funds:
+        lines.append("📈 İLGİLİ FONLAR:")
+        for f in funds:
+            ret_1y = f.get("return_1y")
+            ret_str = f"%{ret_1y:.1f}" if ret_1y is not None else "?"
+            price = f.get("price") or 0.0
+            name = (f.get("name") or "")[:50]
+            lines.append(
+                f"  - {f.get('code')} | {name} | "
+                f"1Y getiri: {ret_str} | Fiyat: {price:.4f}"
+            )
+        lines.append("")
 
-5. MAKRO İLİŞKİLER:
-   - Dolar/Euro yükseliyor → Eurobond/döviz fonları kazançlı
-   - Altın yükseliyor → Altın fonları + altın endeksli BES iyi
-   - BIST 100 yükseliyor → Hisse fonları kazançta
-   - TCMB faizi yüksek → Para Piyasası + Borçlanma fonları çekici
+    context_text = "\n".join(lines)
 
-6. YATIRIMCI PROFILİNE GÖRE:
-   - "Muhafazakar yatırımcıyım" → Para piyasası + Tahvil + Altın
-   - "Orta riskli istiyorum" → Karma + Hisse senedi karması
-   - "Yüksek getiri arıyorum" → Hisse + Sektör + Eurobond
+    # Mesaj listesi
+    messages: list[dict] = []
 
-7. SOHBETIN AKICI OLSUN:
-   - Tabii bunlar yatırım tavsiyesi değil — sadece bilgilendirme
-   - Asla "kesin al/sat" deme
-   - "Sen karar ver" tonunda
-   - Ama veriye dayalı net analiz yap
+    # Geçmiş konuşma (son 6 mesaj)
+    for msg in history[-6:]:
+        role = msg.get("role")
+        content = msg.get("content")
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
 
-ÖRNEKLER:
+    # Şu anki soru + context
+    user_content = (
+        f"{context_text}\n\n---\n\nSoru: {message}\n\n"
+        "Yukarıdaki güncel verileri kullanarak doğal bir şekilde cevap ver. "
+        "Liste yapma, paragraflar halinde sohbet et."
+    )
+    messages.append({"role": "user", "content": user_content})
 
-KÖTÜ: "ANK iyi bir fondur."
-İYİ: "ANK son 1 yılda %52 kazandırmış, para piyasası kategorisinde gerçekten
-      iyi durumda. Risk istemeyenler için uygun bir alternatif diyebilirim —
-      mevduat gibi düşün ama biraz daha verimli."
+    return SYSTEM_PROMPT, messages
 
-KÖTÜ: "Banka sektörü hakkında bilgim yok."
-İYİ: "Bak, banka sektörü fonlarına bakıyorum — etiketinde 'Banka' geçen
-      fonların ortalama 1Y getirisi %X, şu an dolar 45 TL'de olduğu için
-      bankalar genelde böyle dönemlerde kazanır."
-"""
 
-SYSTEM_PROMPT = SYSTEM_PROMPT + EK_YETENEKLER
-
+# ===========================================================================
+# 3. STREAM RESPONSE — Claude'dan canlı cevap
+# ===========================================================================
 
 class ChatRequest(BaseModel):
-    """Kullanıcı chat isteği."""
+    """Frontend'den gelen chat isteği."""
+
     message: str
-    history: list[dict] = []  # [{"role": "user|assistant", "content": "..."}]
+    history: list[dict] = []
 
 
-async def stream_chat_response(
+async def stream_response(
     message: str,
     history: list[dict],
 ) -> AsyncGenerator[str, None]:
-    """Claude Haiku'dan streaming cevap al."""
+    """Claude'dan SSE formatında streaming cevap üret."""
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         yield f"data: {json.dumps({'error': 'AI servisi yapılandırılmamış'})}\n\n"
         return
 
-    # Context çek
     try:
-        context = retrieve_context(message)
+        # 1) Context topla
+        context = get_context(message)
 
-        # MAKRO: Birden fazla strateji ile dene — Railway'de garanti veri ulaşması için
-        if not context.get("macro_data"):
-            # Strateji 1: Snapshot cache'den dene (en hızlı, 0ms)
-            try:
-                from kizilelma.web.app import _cache as _snapshot_cache
-                cached_data = _snapshot_cache.get_cached_data()
-                if cached_data:
-                    macros = cached_data.get("macro_data", [])
-                    if macros:
-                        context["macro_data"] = [
-                            {
-                                "symbol": m.get("symbol", ""),
-                                "name": m.get("name", ""),
-                                "value": float(m.get("value", 0)),
-                                "currency": m.get("currency", "TRY"),
-                                "change_pct": (
-                                    float(m["change_pct"])
-                                    if m.get("change_pct") is not None
-                                    else None
-                                ),
-                                "category": m.get("category", ""),
-                                "date": m.get("date", ""),
-                            }
-                            for m in macros
-                        ]
-                        logger.info(
-                            f"[Strateji 1] Cache'den {len(macros)} makro alindi"
-                        )
-            except Exception as cache_exc:
-                logger.warning(
-                    f"[Strateji 1] Cache erisimi basarisiz: {cache_exc}",
-                    exc_info=True,
-                )
-
-            # Strateji 2: Direkt MacroCollector çağır (canlı API)
-            if not context.get("macro_data"):
-                try:
-                    from kizilelma.collectors.macro import MacroCollector
-                    macro_collector = MacroCollector(timeout=8.0)
-                    macro_data_list = await macro_collector.fetch()
-                    if macro_data_list:
-                        context["macro_data"] = [
-                            {
-                                "symbol": m.symbol,
-                                "name": m.name,
-                                "value": float(m.value),
-                                "currency": m.currency,
-                                "change_pct": (
-                                    float(m.change_pct)
-                                    if m.change_pct is not None
-                                    else None
-                                ),
-                                "category": m.category,
-                                "date": m.date.isoformat(),
-                            }
-                            for m in macro_data_list
-                        ]
-                        logger.info(
-                            f"[Strateji 2] MacroCollector'dan {len(macro_data_list)} makro alindi"
-                        )
-                except Exception as fetch_exc:
-                    logger.error(
-                        f"[Strateji 2] MacroCollector hatasi: {fetch_exc}",
-                        exc_info=True,
-                    )
-
-            # Strateji 3: Snapshot endpoint'ine self-call (son canlı çare)
-            if not context.get("macro_data"):
-                try:
-                    import httpx
-                    base_urls = [
-                        "http://localhost:8000",  # Railway internal
-                        "https://yzportfoy.com",  # Public domain
-                    ]
-                    for base in base_urls:
-                        try:
-                            async with httpx.AsyncClient(timeout=10.0) as client:
-                                resp = await client.get(f"{base}/api/snapshot")
-                                if resp.status_code == 200:
-                                    snap = resp.json()
-                                    data = snap.get("data", snap)
-                                    macros = data.get("macro_data", [])
-                                    if macros:
-                                        context["macro_data"] = [
-                                            {
-                                                "symbol": m.get("symbol", ""),
-                                                "name": m.get("name", ""),
-                                                "value": float(m.get("value", 0)),
-                                                "currency": m.get("currency", "TRY"),
-                                                "change_pct": (
-                                                    float(m["change_pct"])
-                                                    if m.get("change_pct") is not None
-                                                    else None
-                                                ),
-                                                "category": m.get("category", ""),
-                                                "date": m.get("date", ""),
-                                            }
-                                            for m in macros
-                                        ]
-                                        logger.info(
-                                            f"[Strateji 3] Self-call ({base}) ile {len(macros)} makro alindi"
-                                        )
-                                        break
-                        except Exception as inner_exc:
-                            logger.warning(
-                                f"[Strateji 3] {base} self-call basarisiz: {inner_exc}"
-                            )
-                            continue
-                except Exception as self_exc:
-                    logger.error(
-                        f"[Strateji 3] Self-call genel hata: {self_exc}",
-                        exc_info=True,
-                    )
-
-            # Strateji 4: Hard-coded fallback — AI hiçbir zaman "veri yok" demesin
-            if not context.get("macro_data"):
-                logger.warning(
-                    "[Strateji 4] Tum stratejiler basarisiz, hard-coded fallback kullaniliyor"
-                )
-                import datetime as _dt
-                today = _dt.date.today().isoformat()
-                context["macro_data"] = [
-                    {
-                        "symbol": "USDTRY",
-                        "name": "Dolar",
-                        "value": 45.3532,
-                        "currency": "TRY",
-                        "category": "currency",
-                        "date": today,
-                        "change_pct": None,
-                    },
-                    {
-                        "symbol": "EURTRY",
-                        "name": "Euro",
-                        "value": 53.5211,
-                        "currency": "TRY",
-                        "category": "currency",
-                        "date": today,
-                        "change_pct": None,
-                    },
-                    {
-                        "symbol": "GOLD_GR",
-                        "name": "Gram Altın",
-                        "value": 6875.62,
-                        "currency": "TRY",
-                        "category": "commodity",
-                        "date": today,
-                        "change_pct": None,
-                    },
-                    {
-                        "symbol": "BIST100",
-                        "name": "BIST 100",
-                        "value": 15062.65,
-                        "currency": "TRY",
-                        "category": "index",
-                        "date": today,
-                        "change_pct": None,
-                    },
-                ]
-
-        # Final durum logu
+        # 2) Debug log — neyi yolladığımızı görelim
         logger.info(
-            f"Final context: macro={len(context.get('macro_data', []))}, "
-            f"funds={len(context.get('funds', []))}, "
-            f"repos={len(context.get('repo_rates', []))}"
+            "AI context: macro=%d, funds=%d, repos=%d",
+            len(context.get("macro_data", [])),
+            len(context.get("funds", [])),
+            len(context.get("repo_rates", [])),
         )
 
-        context_text = format_context_for_prompt(context)
-        logger.info(f"Chat prompt hazirlandi: prompt_chars={len(context_text)}")
-    except Exception as exc:
-        logger.error(f"Context retrieval hatasi: {exc}", exc_info=True)
-        context_text = "Veri alınamadı."
+        # 3) Prompt
+        system, messages = build_prompt(context, message, history)
 
-    # Messages yapısı
-    messages = []
-    # Geçmiş konuşma (son 8 mesaj — daha fazla context için)
-    for msg in history[-8:]:
-        if msg.get("role") in ("user", "assistant") and msg.get("content"):
-            messages.append({
-                "role": msg["role"],
-                "content": msg["content"],
-            })
-
-    # Şimdiki soru + context
-    # Context'i user mesajına değil, system içine saklayarak daha doğal konuşma
-    user_content = f"""Aşağıda sana güncel piyasa verilerim var. İçinde
-"### MAKRO VERİLER — CANLI" bölümü varsa, oradaki dolar/euro/altın/BIST/petrol
-rakamları GERÇEKTİR ve sorulduğunda kullanılmalıdır:
-
-{context_text}
-
----
-
-Kullanıcının sorusu: {message}
-
-Hatırlatma: Cevabın akıcı bir paragraf olsun, bullet point listesi olarak
-çıkma. Ama context'teki rakamları doğal cümlenin içinde MUTLAKA kullan."""
-
-    messages.append({"role": "user", "content": user_content})
-
-    try:
+        # 4) Claude'a stream
         client = anthropic.AsyncAnthropic(api_key=api_key)
-
         async with client.messages.stream(
             model=CLAUDE_MODEL,
             max_tokens=MAX_TOKENS,
             temperature=TEMPERATURE,
-            system=SYSTEM_PROMPT,
+            system=system,
             messages=messages,
         ) as stream:
             async for text in stream.text_stream:
-                # SSE formatı
                 yield f"data: {json.dumps({'chunk': text})}\n\n"
-
             yield f"data: {json.dumps({'done': True})}\n\n"
 
     except anthropic.APIError as exc:
-        logger.error(f"Claude API hatası: {exc}")
-        yield f"data: {json.dumps({'error': f'AI servisinde sorun: {str(exc)[:100]}'})}\n\n"
-    except Exception as exc:
-        logger.error(f"Chat streaming hatası: {exc}")
-        yield f"data: {json.dumps({'error': 'Beklenmeyen bir hata oluştu'})}\n\n"
+        logger.error("Claude API hatası: %s", exc)
+        yield f"data: {json.dumps({'error': f'AI sorunu: {str(exc)[:100]}'})}\n\n"
+    except Exception as exc:  # noqa: BLE001 — kullanıcıya 500 döndürmek istemiyoruz
+        logger.error("Chat hatası: %s", exc, exc_info=True)
+        yield f"data: {json.dumps({'error': 'Beklenmeyen hata'})}\n\n"
 
 
-async def chat_endpoint(request: ChatRequest):
-    """Chat endpoint — SSE streaming döner."""
+async def chat_endpoint(request: ChatRequest) -> StreamingResponse:
+    """FastAPI handler — SSE StreamingResponse döner."""
     return StreamingResponse(
-        stream_chat_response(request.message, request.history),
+        stream_response(request.message, request.history),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
         },
     )
-

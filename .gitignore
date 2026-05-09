@@ -19,3 +19,6 @@ venv/
 # Build
 dist/
 build/
+
+# Yedeklenen eski dosyalar
+*.old

@@ -134,6 +134,31 @@ async def stream_chat_response(
     # Context çek
     try:
         context = retrieve_context(message)
+        
+        # Eğer context'te makro veri yoksa, snapshot cache'den almayı dene
+        if not context.get("macro_data"):
+            try:
+                from kizilelma.web.app import _cache as _snapshot_cache
+                cached_data = _snapshot_cache.get_cached_data()
+                if cached_data:
+                    macros = cached_data.get("macro_data", [])
+                    if macros:
+                        context["macro_data"] = [
+                            {
+                                "symbol": m.get("symbol", ""),
+                                "name": m.get("name", ""),
+                                "value": float(m.get("value", 0)),
+                                "currency": m.get("currency", "TRY"),
+                                "change_pct": float(m["change_pct"]) if m.get("change_pct") else None,
+                                "category": m.get("category", ""),
+                                "date": m.get("date", ""),
+                            }
+                            for m in macros
+                        ]
+                        logger.info(f"Macro verileri cache'den alindi: {len(macros)} öge")
+            except Exception as cache_exc:
+                logger.warning(f"Snapshot cache okunamadi: {cache_exc}")
+        
         context_text = format_context_for_prompt(context)
     except Exception as exc:
         logger.error(f"Context retrieval hatası: {exc}")

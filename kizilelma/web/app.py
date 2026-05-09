@@ -150,6 +150,10 @@ class SnapshotCache:
             "live_error": live_error,
         }
 
+    def get_cached_data(self) -> Optional[dict]:
+        """Cache'deki ham veri (varsa) — async olmayan erişim için."""
+        return self._data
+
 
 _cache = SnapshotCache()
 

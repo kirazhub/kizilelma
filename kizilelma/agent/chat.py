@@ -23,6 +23,7 @@ from sqlmodel import Session, select
 
 from kizilelma.storage.db import get_engine
 from kizilelma.storage.models import (
+    FundPriceRecord,
     FundRecord,
     MacroRecord,
     RepoRecord,
@@ -174,7 +175,7 @@ def get_context(message: str) -> dict:
 
         if fund_codes:
             # Belirli fonları getir (en son fiyat)
-            funds: list[FundRecord] = []
+            funds: list[dict] = []
             for code in fund_codes[:5]:
                 stmt = (
                     select(FundRecord)
@@ -184,8 +185,11 @@ def get_context(message: str) -> dict:
                 )
                 fund = session.exec(stmt).first()
                 if fund:
-                    funds.append(fund)
-            context["funds"] = [_fund_dict(f) for f in funds]
+                    fund_dict = _fund_dict(fund)
+                    # YENİ: Tarihsel fiyat verileri (1y/6a/3a/1a önce)
+                    fund_dict["price_history"] = _get_price_history(code, session)
+                    funds.append(fund_dict)
+            context["funds"] = funds
         else:
             # Genel: en yüksek 1Y getirili 5 fon
             # Fon içeren en son snapshot'ı kullan (snap_id boş olabilir)
@@ -215,6 +219,61 @@ def _fund_dict(f: FundRecord) -> dict:
         "return_1y": float(f.return_1y) if f.return_1y is not None else None,
         "date": f.date.isoformat() if f.date else "",
     }
+
+
+def _get_price_history(code: str, session: Session) -> dict:
+    """Bir fon için tarihsel trend verilerini al.
+
+    `fund_prices` tablosundan 1 ay, 3 ay, 6 ay ve 1 yıl önceki fiyatları
+    bulur — hedef tarihe en yakın (≤) kayıt seçilir. Tatil günleri için
+    en yakın iş gününe düşer.
+
+    Returns:
+        {
+            "current":       {"price": ..., "date": ...},
+            "1_month_ago":   {"price": ..., "date": ...},
+            "3_months_ago":  {"price": ..., "date": ...},
+            "6_months_ago":  {"price": ..., "date": ...},
+            "1_year_ago":    {"price": ..., "date": ...},
+            "1_year_change_pct": yüzde değişim,
+        }
+    """
+    import datetime as dt
+
+    today = dt.date.today()
+    targets = {
+        "current": today,
+        "1_month_ago": today - dt.timedelta(days=30),
+        "3_months_ago": today - dt.timedelta(days=90),
+        "6_months_ago": today - dt.timedelta(days=180),
+        "1_year_ago": today - dt.timedelta(days=365),
+    }
+
+    history: dict = {}
+    for label, target_date in targets.items():
+        # Hedef tarihe en yakın (≤) kayıt
+        stmt = (
+            select(FundPriceRecord)
+            .where(FundPriceRecord.code == code)
+            .where(FundPriceRecord.date <= target_date)
+            .order_by(FundPriceRecord.date.desc())
+            .limit(1)
+        )
+        record = session.exec(stmt).first()
+        if record:
+            history[label] = {
+                "price": float(record.price),
+                "date": record.date.isoformat(),
+            }
+
+    # Yıllık gerçek değişim yüzdesi
+    if "current" in history and "1_year_ago" in history:
+        cur = history["current"]["price"]
+        old = history["1_year_ago"]["price"]
+        if old > 0:
+            history["1_year_change_pct"] = ((cur - old) / old) * 100
+
+    return history
 
 
 # ===========================================================================
@@ -489,6 +548,34 @@ def build_prompt(
                 f"  - {f.get('code')} | {name} | {category} | "
                 f"1Y getiri: {ret_str} | Fiyat: {price:.4f}"
             )
+
+            # YENİ: Tarihsel trend (fon koduna göre sorgulandıysa eklenir)
+            price_history = f.get("price_history") or {}
+            if price_history:
+                trend_parts: list[str] = []
+                if "1_year_ago" in price_history:
+                    trend_parts.append(
+                        f"1 yıl önce: {price_history['1_year_ago']['price']:.4f}"
+                    )
+                if "6_months_ago" in price_history:
+                    trend_parts.append(
+                        f"6 ay önce: {price_history['6_months_ago']['price']:.4f}"
+                    )
+                if "3_months_ago" in price_history:
+                    trend_parts.append(
+                        f"3 ay önce: {price_history['3_months_ago']['price']:.4f}"
+                    )
+                if "1_month_ago" in price_history:
+                    trend_parts.append(
+                        f"1 ay önce: {price_history['1_month_ago']['price']:.4f}"
+                    )
+
+                if trend_parts:
+                    lines.append(f"    📊 Tarihsel: {' | '.join(trend_parts)}")
+
+                if "1_year_change_pct" in price_history:
+                    pct = price_history["1_year_change_pct"]
+                    lines.append(f"    📈 1Y Gerçek Değişim: %{pct:+.1f}")
         lines.append("")
 
     context_text = "\n".join(lines)

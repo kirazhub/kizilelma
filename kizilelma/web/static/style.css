@@ -2349,3 +2349,75 @@ body::after {
     margin-top: 8px !important;
   }
 }
+
+/* ===== Mobil son rotuşlar (v10) ===== */
+@media (max-width: 700px) {
+  /* Smooth scroll */
+  html { scroll-behavior: smooth; }
+
+  /* Logo */
+  .logo {
+    font-size: 18px !important;
+    letter-spacing: 0.05em !important;
+  }
+  .logo-sub {
+    font-size: 9px !important;
+    color: var(--text-muted) !important;
+  }
+
+  /* Touch friendly butonlar */
+  .chat-toggle, button, .btn {
+    min-height: 44px !important;
+  }
+  .chat-toggle {
+    min-height: 56px !important;
+    font-size: 14px !important;
+  }
+
+  /* Status bar */
+  .status-bar {
+    font-size: 11px !important;
+    padding: 8px 10px !important;
+    flex-wrap: wrap !important;
+  }
+  .status-bar > * {
+    font-size: 11px !important;
+  }
+
+  /* Ticker güzelleştirme */
+  .ticker-item {
+    background: linear-gradient(135deg,
+      var(--bg-tertiary) 0%,
+      rgba(255, 140, 0, 0.05) 100%) !important;
+    transition: transform 0.2s;
+  }
+  .ticker-value {
+    color: var(--accent-amber) !important;
+    font-weight: 700 !important;
+  }
+  .ticker-label {
+    color: var(--text-muted) !important;
+  }
+}
+
+/* Hover effects sadece desktop'ta */
+@media (hover: hover) and (pointer: fine) {
+  .data-table tbody tr:hover {
+    background: var(--bg-tertiary);
+    transform: translateX(2px);
+  }
+  .ticker-item:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* Mobilde hover yok */
+@media (hover: none) {
+  .data-table tbody tr:hover {
+    background: transparent !important;
+    transform: none !important;
+  }
+  .ticker-item:hover {
+    transform: none !important;
+  }
+}

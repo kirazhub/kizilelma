@@ -726,8 +726,18 @@ function searchFunds(query) {
 
 function setupKeyboard() {
   document.addEventListener('keydown', (e) => {
-    const isInput = document.activeElement && document.activeElement.tagName === 'INPUT';
+    // Input alanlarında klavye kısayollarını çalıştırma
+    // INPUT, TEXTAREA, SELECT veya contenteditable
+    const ae = document.activeElement;
+    const isInput = ae && (
+      ae.tagName === 'INPUT' ||
+      ae.tagName === 'TEXTAREA' ||
+      ae.tagName === 'SELECT' ||
+      ae.isContentEditable
+    );
     const cmdOpen = !$('#command-overlay').hidden;
+    // Chat açıksa kısayolları devre dışı bırak (yazarken karışmasın)
+    const chatOpen = chatState && chatState.open;
 
     // ESC — komut kutusu kapat / panel seçimi kaldır
     if (e.key === 'Escape') {
@@ -742,6 +752,7 @@ function setupKeyboard() {
     }
 
     if (isInput) return; // input alanlarında kısayolları yakalama
+    if (chatOpen) return; // chat açıkken kısayolları devre dışı bırak
 
     // / — arama
     if (e.key === '/') {

@@ -1626,21 +1626,106 @@ body::after {
   text-transform: uppercase;
 }
 
-/* Mobile responsive */
+/* Mobile responsive — Klavye uyumlu, tam ekran chat */
 @media (max-width: 700px) {
   .chat-widget {
-    bottom: 12px;
-    right: 12px;
-    left: 12px;
+    bottom: 0;
+    right: 0;
+    left: 0;
+    /* iOS güvenli alan desteği */
+    padding-bottom: env(safe-area-inset-bottom, 0);
   }
 
+  /* Açık panelken: TAM EKRAN (klavye açılınca da düzgün davranır) */
   .chat-panel {
-    width: auto;
-    height: 70vh;
+    position: fixed;
+    inset: 0; /* tüm ekranı kaplasın */
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    border: none;
+    z-index: 9999;
+    /* Klavye açılınca otomatik küçülür */
+    height: 100dvh; /* dynamic viewport height — modern tarayıcılarda klavye'yi hesaba katar */
   }
 
+  /* Header'a alt kenarlık + güvenli alan üstü */
+  .chat-header {
+    padding: 14px 16px;
+    padding-top: calc(14px + env(safe-area-inset-top, 0));
+    flex-shrink: 0;
+  }
+
+  /* Kapat butonu daha büyük (parmak için) */
+  .chat-close {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+  }
+
+  /* Mesajlar kısmı esnek, kaydırılabilir */
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    /* iOS momentum scroll */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Input alanı sabit altta, klavye açılınca üste kayar */
+  .chat-input-area {
+    flex-shrink: 0;
+    padding: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0));
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    /* sticky değil, normal flex */
+  }
+
+  /* Input daha büyük (parmakla yazmak için) */
+  .chat-input {
+    font-size: 16px; /* iOS'ta zoom'a girmemesi için 16px+ olmalı */
+    min-height: 44px;
+    padding: 12px;
+  }
+
+  /* Gönder butonu daha büyük */
+  .chat-send {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+  }
+
+  /* Floating button (chat kapalıyken) — alt köşede */
   .chat-toggle {
-    width: 100%;
+    width: auto;
+    margin: 0 12px 12px 12px;
     justify-content: center;
+    padding: 14px 18px;
+    /* iOS güvenli alan */
+    margin-bottom: calc(12px + env(safe-area-inset-bottom, 0));
+  }
+
+  /* Chat içindeki yazılar mobile için biraz daha büyük */
+  .chat-message-bubble {
+    font-size: 14px;
+    line-height: 1.5;
+    max-width: 85%;
+  }
+
+  /* Yasal uyarı altta, taşmasın */
+  .chat-legal {
+    flex-shrink: 0;
+    padding: 8px 12px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0));
+    font-size: 10px;
+  }
+
+  /* Suggestion butonları mobilde daha rahat tıklanır */
+  .chat-suggestion-btn {
+    padding: 12px;
+    font-size: 13px;
+    min-height: 44px;
   }
 }

@@ -132,3 +132,23 @@ class NewsRecord(SQLModel, table=True):
     source: str
     published: dt.datetime
     summary: Optional[str] = None
+
+
+class MacroRecord(SQLModel, table=True):
+    """Makro veri kaydı (döviz, altın, BIST, emtia).
+
+    AI'ın 'dolar nasıl?', 'borsa nasıl?' gibi sorulara cevap verebilmesi için
+    her snapshot'ta bu tabloya yazılır.
+    """
+
+    __tablename__ = "macro"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    snapshot_id: int = Field(foreign_key="snapshots.id", index=True)
+    symbol: str = Field(index=True)
+    name: str
+    value: float
+    currency: str = "TRY"
+    change_pct: Optional[float] = None
+    category: str
+    date: dt.date

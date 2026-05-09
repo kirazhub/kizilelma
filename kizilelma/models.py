@@ -87,6 +87,22 @@ class NewsItem(BaseModel):
     summary: Optional[str] = Field(None, description="Kısa özet")
 
 
+class MacroData(BaseModel):
+    """Makro ekonomik veri (kur, endeks, emtia).
+
+    Tek bir makro göstergenin günlük değeri. AI'ın 'piyasa nasıl?' sorularına
+    cevap verirken bağlam olarak kullandığı temel veri.
+    """
+
+    symbol: str = Field(..., description="Sembol (örn. USDTRY, GOLD_GR, BIST100)")
+    name: str = Field(..., description="Görüntü adı (Türkçe)")
+    value: Decimal = Field(..., description="Güncel değer")
+    currency: str = Field("TRY", description="Para birimi (TRY/USD)")
+    change_pct: Optional[Decimal] = Field(None, description="Günlük değişim %")
+    category: str = Field(..., description="Tür: 'currency', 'commodity', 'index'")
+    date: dt.date = Field(..., description="Tarih")
+
+
 class MarketSnapshot(BaseModel):
     """Belirli bir andaki tüm piyasa verisinin anlık görüntüsü.
 
@@ -101,6 +117,10 @@ class MarketSnapshot(BaseModel):
     repo_rates: list[RepoRate] = Field(default_factory=list)
     eurobonds: list[EurobondData] = Field(default_factory=list)
     news: list[NewsItem] = Field(default_factory=list)
+    macro_data: list[MacroData] = Field(
+        default_factory=list,
+        description="Döviz kurları, altın, BIST, emtia gibi makro veriler",
+    )
     errors: dict[str, str] = Field(
         default_factory=dict,
         description="Veri çekilemeyen kaynaklar ve hata mesajları",

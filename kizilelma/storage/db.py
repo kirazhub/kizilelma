@@ -16,6 +16,7 @@ from kizilelma.storage.models import (
     BondRecord,
     EurobondRecord,
     FundRecord,
+    MacroRecord,
     NewsRecord,
     RepoRecord,
     ReportRecord,
@@ -145,6 +146,21 @@ def save_snapshot(snapshot: MarketSnapshot, engine=None) -> int:
                     source=n.source,
                     published=n.published,
                     summary=n.summary,
+                )
+            )
+
+        # Makro veriler (döviz, altın, BIST, emtia)
+        for m in snapshot.macro_data:
+            session.add(
+                MacroRecord(
+                    snapshot_id=snap_id,
+                    symbol=m.symbol,
+                    name=m.name,
+                    value=float(m.value),
+                    currency=m.currency,
+                    change_pct=_to_float(m.change_pct),
+                    category=m.category,
+                    date=m.date,
                 )
             )
 
@@ -288,6 +304,10 @@ def get_latest_full_snapshot(engine=None) -> Optional[dict]:
         news_stmt = select(NewsRecord).where(NewsRecord.snapshot_id == snap.id)
         news_records = list(session.exec(news_stmt))
 
+        # Makro veriler
+        macro_stmt = select(MacroRecord).where(MacroRecord.snapshot_id == snap.id)
+        macro_records = list(session.exec(macro_stmt))
+
         # errors JSON parse et — bozuksa boş dict
         try:
             errors = json.loads(snap.errors_json) if snap.errors_json else {}
@@ -368,6 +388,18 @@ def get_latest_full_snapshot(engine=None) -> Optional[dict]:
                     "summary": n.summary,
                 }
                 for n in news_records
+            ],
+            "macro_data": [
+                {
+                    "symbol": m.symbol,
+                    "name": m.name,
+                    "value": str(m.value),
+                    "currency": m.currency,
+                    "change_pct": str(m.change_pct) if m.change_pct is not None else None,
+                    "category": m.category,
+                    "date": m.date.isoformat(),
+                }
+                for m in macro_records
             ],
             "errors": errors,
         }

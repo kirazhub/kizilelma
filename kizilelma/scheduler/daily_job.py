@@ -21,6 +21,7 @@ from kizilelma.collectors.tcmb import TcmbCollector
 from kizilelma.collectors.bist import BistCollector
 from kizilelma.collectors.eurobond import EurobondCollector
 from kizilelma.collectors.news import NewsCollector
+from kizilelma.collectors.macro import MacroCollector
 from kizilelma.ai_advisor.advisor import AIAdvisor
 
 
@@ -36,6 +37,7 @@ async def collect_all_data() -> MarketSnapshot:
     bist = BistCollector()
     eurobond = EurobondCollector()
     news = NewsCollector()
+    macro = MacroCollector()
 
     # Paralel çalıştır
     results = await asyncio.gather(
@@ -44,9 +46,17 @@ async def collect_all_data() -> MarketSnapshot:
         _safe(bist.fetch, "bist"),
         _safe(eurobond.fetch, "eurobond"),
         _safe(news.fetch, "news"),
+        _safe(macro.fetch, "macro"),
     )
 
-    funds_result, repo_result, bist_result, eurobond_result, news_result = results
+    (
+        funds_result,
+        repo_result,
+        bist_result,
+        eurobond_result,
+        news_result,
+        macro_result,
+    ) = results
 
     # BIST tuple döner (bonds, sukuks)
     if bist_result.get("error"):
@@ -63,6 +73,7 @@ async def collect_all_data() -> MarketSnapshot:
         sukuks=sukuks,
         eurobonds=eurobond_result.get("data") or [],
         news=news_result.get("data") or [],
+        macro_data=macro_result.get("data") or [],
     )
 
     # Hataları topla
@@ -72,6 +83,7 @@ async def collect_all_data() -> MarketSnapshot:
         (bist_result, "bist"),
         (eurobond_result, "eurobond"),
         (news_result, "news"),
+        (macro_result, "macro"),
     ]:
         if r.get("error"):
             snapshot.errors[name] = r["error"]

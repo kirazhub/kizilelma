@@ -13,6 +13,7 @@ from kizilelma.storage.db import get_engine
 from kizilelma.storage.models import (
     FundRecord, RepoRecord, BondRecord,
     SukukRecord, EurobondRecord, SnapshotRecord,
+    MacroRecord,
 )
 
 
@@ -37,6 +38,7 @@ def retrieve_context(question: str, engine=None) -> dict:
         "bonds": [],
         "sukuks": [],
         "eurobonds": [],
+        "macro_data": [],
         "latest_snapshot": None,
     }
 
@@ -263,6 +265,29 @@ def retrieve_context(question: str, engine=None) -> dict:
                 for e in ebs
             ]
 
+        # ---- Makro veriler (her zaman al) ----
+        # Kullanıcı "dolar nasıl?", "borsa nasıl?" gibi açık sormasa bile
+        # AI'ın genel yorum yapabilmesi için makro tabloyu her zaman context'e
+        # koyuyoruz. Veri zaten az (~7 satır), bandwidth maliyeti ihmal edilebilir.
+        try:
+            macro_stmt = select(MacroRecord).where(MacroRecord.snapshot_id == snap_id)
+            macros = list(session.exec(macro_stmt))
+            context["macro_data"] = [
+                {
+                    "symbol": m.symbol,
+                    "name": m.name,
+                    "value": float(m.value),
+                    "currency": m.currency,
+                    "change_pct": float(m.change_pct) if m.change_pct is not None else None,
+                    "category": m.category,
+                    "date": m.date.isoformat(),
+                }
+                for m in macros
+            ]
+        except Exception:
+            # Eski snapshot'larda macro tablosu olmayabilir; sessizce geç
+            context["macro_data"] = []
+
     return context
 
 
@@ -316,6 +341,18 @@ def format_context_for_prompt(context: dict) -> str:
         parts.append("### TCMB FAİZ ORANLARI")
         for r in repos:
             parts.append(f"- {r['type']} ({r['maturity']}): %{r['rate']}")
+        parts.append("")
+
+    macros = context.get("macro_data", [])
+    if macros:
+        parts.append("### MAKRO VERİLER (Döviz, Altın, BIST, Emtia)")
+        for m in macros:
+            cur = "TL" if m["currency"] == "TRY" else m["currency"]
+            change_str = ""
+            if m.get("change_pct") is not None:
+                sign = "+" if m["change_pct"] >= 0 else ""
+                change_str = f" ({sign}%{m['change_pct']:.2f})"
+            parts.append(f"- {m['name']}: {m['value']} {cur}{change_str}")
         parts.append("")
 
     bonds = context.get("bonds", [])

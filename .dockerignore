@@ -8,8 +8,10 @@ venv/
 
 # Env / sırlar (Railway env'lerden alacak)
 .env
-*.db
 *.sqlite
+
+# DB seed dosyasi - özellikle kizilelma.db'yi DOCKER'A AL (Railway'de seed olarak kullanılacak)
+# *.db kuralı kaldırıldı, çünkü kizilelma.db'yi container'a istiyoruz
 
 # IDE
 .vscode/

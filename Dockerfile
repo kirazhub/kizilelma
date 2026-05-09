@@ -49,6 +49,16 @@ RUN pip install --no-cache-dir -e . --no-deps
 # === Veri klasörü ===
 RUN mkdir -p /data
 
+# === DB seed: Lokal'deki 1 yıllık geçmiş veriyi container'a kopyala ===
+# Eğer DB dosyası varsa container içine yerleştir
+# Volume yoksa bu DB kullanılacak (restart'ta kaybolur ama her deploy'da yenilenir)
+COPY kizilelma.db* /data/
+RUN if [ -f /data/kizilelma.db ]; then \
+        echo "✅ DB seed: $(ls -lh /data/kizilelma.db | awk '{print $5}')"; \
+    else \
+        echo "⚠️ DB seed yok, runtime'da oluşturulacak"; \
+    fi
+
 # === Environment ===
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1

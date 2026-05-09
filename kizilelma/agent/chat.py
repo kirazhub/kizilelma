@@ -517,7 +517,9 @@ async def stream_response(
         yield f"data: {json.dumps({'error': f'AI sorunu: {str(exc)[:100]}'})}\n\n"
     except Exception as exc:  # noqa: BLE001 — kullanıcıya 500 döndürmek istemiyoruz
         logger.error("Chat hatası: %s", exc, exc_info=True)
-        yield f"data: {json.dumps({'error': 'Beklenmeyen hata'})}\n\n"
+        # Debug için gerçek hatayı yansıt
+        error_msg = f"Hata: {type(exc).__name__}: {str(exc)[:200]}"
+        yield f"data: {json.dumps({'error': error_msg})}\n\n"
 
 
 async def chat_endpoint(request: ChatRequest) -> StreamingResponse:

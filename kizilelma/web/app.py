@@ -29,6 +29,8 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from kizilelma.agent.chat import ChatRequest, chat_endpoint
+
 
 logger = logging.getLogger(__name__)
 
@@ -381,6 +383,12 @@ async def ai_commentary():
             "generated_at": now.isoformat(),
             "snapshot_timestamp": snapshot.get("timestamp"),
         }
+
+
+@app.post("/api/chat")
+async def chat(request: ChatRequest):
+    """AI chat endpoint — Claude Haiku ile RAG, SSE streaming döner."""
+    return await chat_endpoint(request)
 
 
 def main() -> None:

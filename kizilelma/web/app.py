@@ -171,6 +171,117 @@ app.mount(
 )
 
 
+# ----------------------------------------------------------------------------
+# Startup — DB tabloları (özellikle Railway volume eski şema ile takıldıysa)
+# ----------------------------------------------------------------------------
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    """Sunucu başlarken eksik DB tablolarını oluştur, gerekirse macro seed'le.
+
+    Railway gibi PaaS ortamlarında volume kalıcı kalır ve DB dosyası eski
+    şema ile bekleyebilir; örneğin `macro` tablosu yoksa AI sorguları
+    `OperationalError: no such table: macro` hatası verir.
+
+    `SQLModel.metadata.create_all()` mevcut tabloları silmez — sadece
+    eksikleri oluşturur. Hata fırlatırsa uygulama yine de açılır
+    (snapshot endpoint'i 503'e düşer ama çökmez).
+    """
+    try:
+        from sqlalchemy import inspect
+        from sqlmodel import Session, SQLModel, select
+
+        from kizilelma.storage.db import get_engine
+        # Tüm modelleri import et — SQLModel.metadata'ya kayıt olmaları için
+        from kizilelma.storage.models import (  # noqa: F401
+            BondRecord,
+            EurobondRecord,
+            FundRecord,
+            MacroRecord,
+            NewsRecord,
+            ReportRecord,
+            RepoRecord,
+            SnapshotRecord,
+            SukukRecord,
+        )
+
+        engine = get_engine()
+        SQLModel.metadata.create_all(engine)
+        logger.info("DB tabloları kontrol edildi/oluşturuldu")
+
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        logger.info("DB tabloları: %s", tables)
+
+        # macro tablosu boşsa background'da yfinance ile doldur (block etme)
+        with Session(engine) as session:
+            has_any = session.exec(select(MacroRecord).limit(1)).first()
+        if has_any is None:
+            logger.info("Macro tablosu boş — background seed başlatılıyor")
+            asyncio.create_task(_seed_macro_data())
+        else:
+            logger.info("Macro tablosunda zaten veri var, seed atlandı")
+    except Exception as exc:
+        # Startup hatası uygulamayı çökertmemeli
+        logger.error("DB startup hatası: %s", exc, exc_info=True)
+
+
+async def _seed_macro_data() -> None:
+    """Background task: anlık makro veriyi çekip MacroRecord tablosuna yaz.
+
+    `MacroCollector.fetch()` yfinance'tan döviz/altın/BIST verilerini çeker.
+    Hata olursa sessizce log'lar — uygulama yine açık kalır.
+    """
+    try:
+        from sqlmodel import Session
+
+        from kizilelma.collectors.macro import MacroCollector
+        from kizilelma.storage.db import get_engine
+        from kizilelma.storage.models import MacroRecord, SnapshotRecord
+
+        logger.info("Anlık makro veri toplanıyor (seed)…")
+        collector = MacroCollector(timeout=15.0)
+        macros = await collector.fetch()
+
+        if not macros:
+            logger.warning("Macro fetch boş döndü, seed atlandı")
+            return
+
+        engine = get_engine()
+        with Session(engine) as session:
+            # Seed snapshot — gerçek günlük job'tan ayırmak için count'lar 0
+            snap = SnapshotRecord(
+                timestamp=dt.datetime.now(),
+                fund_count=0,
+                bond_count=0,
+                sukuk_count=0,
+                repo_count=0,
+                eurobond_count=0,
+                news_count=0,
+                errors_json="{}",
+            )
+            session.add(snap)
+            session.flush()  # snap.id'yi al
+
+            for m in macros:
+                rec = MacroRecord(
+                    snapshot_id=snap.id,
+                    symbol=m.symbol,
+                    name=m.name,
+                    value=float(m.value),
+                    currency=m.currency,
+                    change_pct=float(m.change_pct) if m.change_pct is not None else None,
+                    category=m.category,
+                    date=m.date,
+                )
+                session.add(rec)
+
+            session.commit()
+            logger.info("%d makro veri DB'ye seed edildi", len(macros))
+    except Exception as exc:
+        logger.error("Macro seed hatası: %s", exc, exc_info=True)
+
+
 @app.get("/")
 async def home():
     """Ana HTML sayfasını servis et."""

@@ -1,9 +1,18 @@
+# Railway / Nixpacks build yapılandırması
+# Python 3.11 + gerekli sistem paketleri ile kurulum yapar
 [phases.setup]
-aptPkgs = ['...']
-nixPkgs = ['python311', 'gcc']
+nixPkgs = ['python311', 'python311Packages.pip', 'python311Packages.virtualenv', 'gcc']
 
 [phases.install]
-cmds = ['pip install -e .']
+cmds = [
+  'python -m venv /opt/venv',
+  '. /opt/venv/bin/activate && pip install --upgrade pip',
+  '. /opt/venv/bin/activate && pip install -e .'
+]
 
 [start]
-cmd = 'kizilelma-web'
+cmd = '. /opt/venv/bin/activate && kizilelma-web'
+
+[variables]
+PYTHONUNBUFFERED = '1'
+PYTHONDONTWRITEBYTECODE = '1'

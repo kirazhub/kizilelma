@@ -815,3 +815,248 @@ if (document.readyState === 'loading') {
 } else {
   boot();
 }
+
+/* ========================================
+   AI CHAT WIDGET — Claude Haiku SSE Client
+   ======================================== */
+
+const chatState = {
+  open: false,
+  sending: false,
+  history: [],  // [{role, content}]
+  currentAiMessage: null,
+};
+
+function initChat() {
+  const toggle = document.getElementById('chat-toggle');
+  const close = document.getElementById('chat-close');
+  const panel = document.getElementById('chat-panel');
+  const input = document.getElementById('chat-input');
+  const send = document.getElementById('chat-send');
+  const suggestions = document.querySelectorAll('.chat-suggestion-btn');
+
+  if (!toggle || !panel) return;
+
+  // Toggle açma/kapama
+  toggle.addEventListener('click', () => openChat());
+  close.addEventListener('click', () => closeChat());
+
+  // Send button
+  send.addEventListener('click', () => handleSend());
+
+  // Enter ile gönder (Shift+Enter yeni satır)
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  });
+
+  // Otomatik textarea resize
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+  });
+
+  // Örnek sorular
+  suggestions.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const question = btn.dataset.question;
+      input.value = question;
+      handleSend();
+    });
+  });
+
+  // ESC ile kapat
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && chatState.open) {
+      // Başka bir overlay yoksa kapat
+      const cmdOverlay = document.getElementById('command-overlay');
+      if (!cmdOverlay || cmdOverlay.hidden) {
+        closeChat();
+      }
+    }
+  });
+
+  // Restore localStorage history
+  try {
+    const saved = localStorage.getItem('chat_history');
+    if (saved) {
+      const history = JSON.parse(saved);
+      if (Array.isArray(history) && history.length > 0) {
+        chatState.history = history.slice(-20);
+      }
+    }
+  } catch (e) {
+    console.warn('Chat history restore failed:', e);
+  }
+}
+
+function openChat() {
+  const panel = document.getElementById('chat-panel');
+  const toggle = document.getElementById('chat-toggle');
+  const input = document.getElementById('chat-input');
+
+  panel.hidden = false;
+  toggle.hidden = true;
+  chatState.open = true;
+
+  setTimeout(() => input?.focus(), 100);
+}
+
+function closeChat() {
+  const panel = document.getElementById('chat-panel');
+  const toggle = document.getElementById('chat-toggle');
+
+  panel.hidden = true;
+  toggle.hidden = false;
+  chatState.open = false;
+}
+
+async function handleSend() {
+  const input = document.getElementById('chat-input');
+  const send = document.getElementById('chat-send');
+  const message = input.value.trim();
+
+  if (!message || chatState.sending) return;
+
+  chatState.sending = true;
+  send.disabled = true;
+
+  // Örnek soruları gizle (ilk mesajdan sonra)
+  const suggestions = document.getElementById('chat-suggestions');
+  if (suggestions) suggestions.style.display = 'none';
+
+  // User mesajını göster
+  addMessage('user', message);
+
+  // Input temizle
+  input.value = '';
+  input.style.height = 'auto';
+
+  // Geçmişe ekle
+  chatState.history.push({ role: 'user', content: message });
+  saveHistory();
+
+  // AI placeholder mesajı (streaming için)
+  const aiMessageEl = addMessage('ai', '', true);
+  chatState.currentAiMessage = aiMessageEl;
+
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: message,
+        history: chatState.history.slice(-10),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let aiContent = '';
+    let hasError = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.chunk) {
+              aiContent += data.chunk;
+              updateAiMessage(aiMessageEl, aiContent, true);
+            } else if (data.done) {
+              updateAiMessage(aiMessageEl, aiContent, false);
+            } else if (data.error) {
+              updateAiMessage(aiMessageEl, `⚠️ ${data.error}`, false);
+              aiMessageEl.classList.add('error');
+              hasError = true;
+            }
+          } catch (e) {
+            console.warn('SSE parse error:', e, line);
+          }
+        }
+      }
+    }
+
+    // Final stop typing
+    updateAiMessage(aiMessageEl, aiContent || 'Cevap alınamadı.', false);
+
+    if (!hasError && aiContent) {
+      chatState.history.push({ role: 'assistant', content: aiContent });
+      saveHistory();
+    }
+  } catch (error) {
+    console.error('Chat error:', error);
+    updateAiMessage(aiMessageEl, `⚠️ Hata: ${error.message || 'Bağlantı kurulamadı'}`, false);
+    aiMessageEl.classList.add('error');
+  } finally {
+    chatState.sending = false;
+    send.disabled = false;
+    chatState.currentAiMessage = null;
+    input.focus();
+  }
+}
+
+function addMessage(role, content, typing = false) {
+  const container = document.getElementById('chat-messages');
+  if (!container) return null;
+
+  const messageEl = document.createElement('div');
+  messageEl.className = `chat-message chat-message-${role}`;
+  if (typing) messageEl.classList.add('typing');
+
+  const bubbleEl = document.createElement('div');
+  bubbleEl.className = 'chat-message-bubble';
+  bubbleEl.textContent = content;
+
+  messageEl.appendChild(bubbleEl);
+  container.appendChild(messageEl);
+
+  container.scrollTop = container.scrollHeight;
+
+  return messageEl;
+}
+
+function updateAiMessage(messageEl, content, typing) {
+  if (!messageEl) return;
+
+  const bubble = messageEl.querySelector('.chat-message-bubble');
+  if (bubble) bubble.textContent = content;
+
+  if (typing) {
+    messageEl.classList.add('typing');
+  } else {
+    messageEl.classList.remove('typing');
+  }
+
+  const container = document.getElementById('chat-messages');
+  if (container) container.scrollTop = container.scrollHeight;
+}
+
+function saveHistory() {
+  try {
+    localStorage.setItem('chat_history', JSON.stringify(chatState.history.slice(-20)));
+  } catch (e) {
+    console.warn('Chat history save failed:', e);
+  }
+}
+
+// Sayfa yüklendiğinde init
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initChat);
+} else {
+  initChat();
+}

@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Env / sırlar (Railway env'lerden alacak)
+.env
+*.db
+*.sqlite
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Build
+dist/
+build/
+
+# Docs (Docker imajına gerek yok)
+docs/
+docs/*
+
+# Tests (production'da gerek yok)
+tests/
+
+# Git
+.git/
+.github/
+
+# Misc
+*.log
+.coverage
+htmlcov/
+*.tar.gz

@@ -268,7 +268,7 @@ def retrieve_context(question: str, engine=None) -> dict:
         # ---- Makro veriler (her zaman al) ----
         # Kullanıcı "dolar nasıl?", "borsa nasıl?" gibi açık sormasa bile
         # AI'ın genel yorum yapabilmesi için makro tabloyu her zaman context'e
-        # koyuyoruz. Veri zaten az (~7 satır), bandwidth maliyeti ihmal edilebilir.
+        # koyuyoruz.
         try:
             macro_stmt = select(MacroRecord).where(MacroRecord.snapshot_id == snap_id)
             macros = list(session.exec(macro_stmt))
@@ -287,6 +287,43 @@ def retrieve_context(question: str, engine=None) -> dict:
         except Exception:
             # Eski snapshot'larda macro tablosu olmayabilir; sessizce geç
             context["macro_data"] = []
+
+    # ---- DB'de makro yoksa, snapshot endpoint'inden canlı çek (fallback) ----
+    # Bu, yeni deploy'lardan sonra DB henüz dolmadan AI'ın çalışmasını sağlar.
+    if not context["macro_data"]:
+        try:
+            from kizilelma.collectors.macro import MacroCollector
+            import asyncio
+            
+            macro_collector = MacroCollector()
+            
+            # Eğer event loop varsa onu kullan (FastAPI içinde)
+            try:
+                loop = asyncio.get_running_loop()
+                # Running loop varsa - thread executor ile çalıştır
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, macro_collector.fetch())
+                    macro_data = future.result(timeout=15)
+            except RuntimeError:
+                # Loop yoksa - direkt çalıştır
+                macro_data = asyncio.run(macro_collector.fetch())
+            
+            context["macro_data"] = [
+                {
+                    "symbol": m.symbol,
+                    "name": m.name,
+                    "value": float(m.value),
+                    "currency": m.currency,
+                    "change_pct": float(m.change_pct) if m.change_pct is not None else None,
+                    "category": m.category,
+                    "date": m.date.isoformat(),
+                }
+                for m in macro_data
+            ]
+        except Exception as exc:
+            # Tamamen başarısız olursa sessizce geç
+            pass
 
     return context
 

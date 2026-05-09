@@ -20,10 +20,15 @@ from kizilelma.models import (
 
 @pytest.fixture
 def rich_snapshot():
-    """Her kategoriden örnek veri içeren snapshot."""
-    today = dt.date(2026, 4, 23)
+    """Her kategoriden örnek veri içeren snapshot.
+
+    Not: `filter_active_funds` fonların tarihinin son 7 gün içinde olmasını
+    bekler. Bu yüzden fixture'da bugünün tarihini kullanıyoruz, sabit tarih
+    değil — yoksa testler zamanla bayatlayıp kırılır.
+    """
+    today = dt.date.today()
     return MarketSnapshot(
-        timestamp=dt.datetime(2026, 4, 23, 10, 0),
+        timestamp=dt.datetime.combine(today, dt.time(10, 0)),
         funds=[
             FundData(
                 code="AFA", name="Ak Portföy Para Piyasası",

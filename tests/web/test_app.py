@@ -70,12 +70,15 @@ def mock_snapshot():
 
 
 def test_home_returns_html():
-    """Ana sayfa 200 dönmeli ve KIZILELMA içermeli."""
+    """Ana sayfa 200 dönmeli ve marka adını içermeli."""
     client = TestClient(app)
     r = client.get("/")
     assert r.status_code == 200
-    assert "KIZILELMA" in r.text.upper()
-    assert "TERMINAL" in r.text.upper()
+    # Rebrand sonrası marka adı YZPORTFOY (eski: KIZILELMA).
+    # Geriye dönük uyumluluk için ikisinden biri kabul.
+    upper = r.text.upper()
+    assert "YZPORTFOY" in upper or "KIZILELMA" in upper
+    assert "TERMINAL" in upper
 
 
 def test_static_css_served():

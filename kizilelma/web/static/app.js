@@ -79,6 +79,30 @@ function colorClass(v) {
   return n > 0 ? 'positive' : n < 0 ? 'negative' : 'neutral';
 }
 
+/**
+ * Bir fonun "aktif" sayılıp gösterilmeye değer olup olmadığını döner.
+ * Backend'deki filter_active_funds ile aynı mantık:
+ *   - price > 0
+ *   - 1A veya 1Y getirilerinden en az biri 0'dan farklı
+ *   - 1Y varsa mutlak değeri en az %0.5 (yeni kurulan / durağan fonları eler)
+ */
+function isFundActive(f) {
+  if (!f) return false;
+  const price = num(f.price);
+  if (price === null || price <= 0) return false;
+
+  const r1m = num(f.return_1m);
+  const r1y = num(f.return_1y);
+
+  const has1m = r1m !== null && r1m !== 0;
+  const has1y = r1y !== null && r1y !== 0;
+
+  if (!has1m && !has1y) return false;
+  if (has1y && Math.abs(r1y) < 0.5) return false;
+
+  return true;
+}
+
 // ----------------------------------------------------------------------------
 // Saat — saniye saniye güncellenir (İstanbul saati)
 // ----------------------------------------------------------------------------
@@ -389,6 +413,7 @@ function updateTicker() {
 
   // En iyi 1Y
   const best = [...(s.funds || [])]
+    .filter(isFundActive)
     .filter((f) => num(f.return_1y) !== null)
     .sort((a, b) => (num(b.return_1y) || 0) - (num(a.return_1y) || 0))[0];
   if (best) {
@@ -408,8 +433,8 @@ function renderFunds() {
   const root = $('#panel-funds-body');
   const funds = state.snapshot?.funds || [];
 
-  // Yalnızca 1Y getiri verisi olan fonlar (gürültü fonları eler)
-  const valid = funds.filter((f) => num(f.return_1y) !== null);
+  // Aktif fon filtresi: ölü/yeni kurulan/fiyatsız fonları ele
+  const valid = funds.filter(isFundActive);
 
   if (!valid.length) {
     root.innerHTML = '<p class="empty">FON VERİSİ YOK</p>';
@@ -630,6 +655,7 @@ function renderTopPicks() {
   const funds = state.snapshot?.funds || [];
 
   const top = [...funds]
+    .filter(isFundActive)
     .filter((f) => num(f.return_1y) !== null)
     .sort((a, b) => (num(b.return_1y) || 0) - (num(a.return_1y) || 0))
     .slice(0, 25);
@@ -705,6 +731,7 @@ function searchFunds(query) {
     return;
   }
   const matches = state.snapshot.funds
+    .filter(isFundActive)
     .filter(
       (f) =>
         (f.code || '').toLowerCase().includes(q) ||

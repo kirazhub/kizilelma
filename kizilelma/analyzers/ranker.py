@@ -73,12 +73,14 @@ def filter_active_funds(
     funds: list[FundData],
     max_age_days: int = 7,
 ) -> list[FundData]:
-    """İşlem görmeyen / ölü fonları filtrele.
+    """İşlem görmeyen / ölü / yeni kurulmuş fonları filtrele.
 
     Bir fon aktif sayılır eğer:
     - Fiyatı > 0 (Pydantic zaten zorluyor ama defansif kontrol)
     - Fiyatının tarihi son `max_age_days` gün içinde
-    - En az bir getiri değeri (1G/1H/1A/3A/6A/1Y) sıfırdan farklı
+    - En az bir anlamlı getiri değeri (1A veya 1Y) sıfırdan farklı
+    - 1Y getirisi varsa mutlak değeri en az %0.5 (yeni kurulmuş /
+      durağan fonları eler)
 
     Args:
         funds: Tüm fonların listesi
@@ -100,21 +102,17 @@ def filter_active_funds(
         if f.date is None or f.date < cutoff:
             continue
 
-        # Kontrol 3: En az bir getiri değeri 0'dan farklı olmalı
-        has_return = False
-        for metric in (
-            f.return_1d,
-            f.return_1w,
-            f.return_1m,
-            f.return_3m,
-            f.return_6m,
-            f.return_1y,
-        ):
-            if metric is not None and metric != 0:
-                has_return = True
-                break
+        # Kontrol 3: 1A veya 1Y getirisi anlamlı olmalı
+        has_1m = f.return_1m is not None and f.return_1m != Decimal(0)
+        has_1y = f.return_1y is not None and f.return_1y != Decimal(0)
 
-        if not has_return:
+        if not (has_1m or has_1y):
+            # Ne 1A ne 1Y verisi var = ölü fon
+            continue
+
+        # Kontrol 4: 1Y getirisi varsa anlamlı bir hareket göstermeli
+        # (yeni kurulmuş / durağan fonlar mutlak %0.5'in altındadır)
+        if has_1y and abs(f.return_1y) < Decimal("0.5"):
             continue
 
         active.append(f)

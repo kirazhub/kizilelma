@@ -13,8 +13,6 @@ class Config:
     def __init__(self) -> None:
         self.tcmb_api_key: str = self._require("TCMB_API_KEY")
         self.anthropic_api_key: str = self._require("ANTHROPIC_API_KEY")
-        self.telegram_bot_token: str = self._require("TELEGRAM_BOT_TOKEN")
-        self.telegram_chat_id: str = self._require("TELEGRAM_CHAT_ID")
         self.environment: str = os.getenv("ENVIRONMENT", "development")
 
     @staticmethod

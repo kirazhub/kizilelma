@@ -3,9 +3,9 @@
 Hikaye/yorum YOK. Saf tablo/liste. Kullanıcı ham veriyi istiyor:
 "hangi fon ne kadar veriyor, hangi araç ne kadar kazandırıyor".
 
-Tüm tablolar Telegram'ın sade metin (parse_mode olmadan) akışı için
+Tüm tablolar web arayüzünde sade metin olarak gösterilmek üzere
 hazırlanmıştır. Sabit genişlikli (monospace) görünüm hedeflenmez;
-kullanıcı mobil ekranda okuyacağı için "satır başına tek fon" + dikey
+kullanıcı mobil ekranda da okuyacağı için "satır başına tek fon" + dikey
 hizalamak yerine "anahtar: değer" stilinde kompakt format tercih edilmiştir.
 """
 from decimal import Decimal

@@ -1,4 +1,4 @@
-name: Kızılelma Günlük Rapor
+name: Kızılelma Veri Toplama
 
 on:
   schedule:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:  # Manuel tetikleme
 
 jobs:
-  daily-report:
+  collect-data:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -38,12 +38,10 @@ jobs:
           restore-keys: |
             kizilelma-db-
 
-      - name: Run Kızılelma report
+      - name: Collect data
         env:
           TCMB_API_KEY: ${{ secrets.TCMB_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: kizilelma run-now
 
       - name: Upload DB as artifact

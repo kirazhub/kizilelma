@@ -27,6 +27,4 @@ jobs:
         env:
           TCMB_API_KEY: test_key
           ANTHROPIC_API_KEY: test_key
-          TELEGRAM_BOT_TOKEN: test_key
-          TELEGRAM_CHAT_ID: "12345"
         run: pytest -v

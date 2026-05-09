@@ -20,8 +20,6 @@ Deploy olduktan sonra **Variables** sekmesine git ve şunları ekle:
 
 | Key | Value |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | (senin Telegram bot token'ın) |
-| `TELEGRAM_CHAT_ID` | (senin chat id'n) |
 | `ANTHROPIC_API_KEY` | (Claude API key'in) |
 | `TCMB_API_KEY` | (opsiyonel) |
 

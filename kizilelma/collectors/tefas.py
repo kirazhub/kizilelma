@@ -404,7 +404,7 @@ def _parse_detail_return_3m(html: str) -> Optional[Decimal]:
 # --------------------------------------------------------------------- #
 #
 # Neden gerekli?
-#     Kullanıcı Telegram raporunda "MT7 fonu neyin fonu?" diye merak ediyor.
+#     Kullanıcı raporda "MT7 fonu neyin fonu?" diye merak ediyor.
 #     Fon adı çoğu zaman çok uzun ve kısaltmalıdır. Altına 3-6 etiket koyarak
 #     (örn. "🏷️ Hisse · Teknoloji · BIST30") bir bakışta içeriği söyletiyoruz.
 #
@@ -420,7 +420,7 @@ def _parse_detail_return_3m(html: str) -> Optional[Decimal]:
 #     4. Tema/Strateji (Faizsiz, Serbest, Makro, ESG, ...)
 #     5. Coğrafya (ABD, Avrupa, Global, ...)
 #
-# Maksimum 6 etiketle sınırlı — Telegram satırını taşırmamak için.
+# Maksimum 6 etiketle sınırlı — UI satırını taşırmamak için.
 
 # Anahtar kelime → etiket eşlemesi (normalize edilmiş ASCII metin üzerinde
 # çalışır; Türkçe karakterler büyük ASCII harfe çevrilmiştir)

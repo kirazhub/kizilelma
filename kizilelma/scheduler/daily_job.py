@@ -2,13 +2,12 @@
 
 Akış:
     1. collect_all_data()  → tüm collector'ları paralel çalıştır
-    2. AIAdvisor             → metrikleri hesapla + AI yorum üret
-    3. TelegramSender       → rapor mesajlarını gönder
+    2. AIAdvisor           → metrikleri hesapla + AI yorum üret
+    3. DB'ye kaydet         → snapshot ve raporu sakla
 
 Hata toleransı:
     - Bir collector çökerse snapshot.errors'a not düşülür
-    - AI çökerse rapor yine de ham veri olarak gönderilir
-    - Telegram tek tek mesajlar başarısız olabilir
+    - AI çökerse rapor yine de ham veri olarak kaydedilir
 """
 import asyncio
 import datetime as dt
@@ -23,7 +22,6 @@ from kizilelma.collectors.bist import BistCollector
 from kizilelma.collectors.eurobond import EurobondCollector
 from kizilelma.collectors.news import NewsCollector
 from kizilelma.ai_advisor.advisor import AIAdvisor
-from kizilelma.telegram_bot.bot import TelegramSender
 
 
 logger = logging.getLogger(__name__)
@@ -116,29 +114,23 @@ async def run_daily_job() -> dict[str, Any]:
     report = await advisor.generate_report(snapshot)
     logger.info(f"Rapor üretildi: errors={report.errors}")
 
-    # 3. Telegram'a gönder
-    sender = TelegramSender(
-        token=config.telegram_bot_token,
-        chat_id=config.telegram_chat_id,
-    )
-    sent = await sender.send_report(report)
-    logger.info(f"{sent} mesaj gönderildi")
-
-    # 4. DB'ye kaydet
+    # 3. DB'ye kaydet
     snapshot_id = None
+    db_saved = False
     try:
         snapshot_id = save_snapshot(snapshot)
         save_report(
             report, snapshot_id=snapshot_id,
-            sent_messages=sent,
-            status="success" if sent > 0 and not snapshot.errors else "partial",
+            sent_messages=0,
+            status="partial" if (snapshot.errors or report.errors) else "success",
         )
+        db_saved = True
         logger.info(f"DB'ye kaydedildi: snapshot_id={snapshot_id}")
     except Exception as exc:
         logger.warning(f"DB kayıt başarısız: {exc}")
 
     # Sonuç
-    if sent == 0:
+    if not db_saved:
         status = "failed"
     elif snapshot.errors or report.errors:
         status = "partial"
@@ -147,7 +139,6 @@ async def run_daily_job() -> dict[str, Any]:
 
     return {
         "status": status,
-        "sent_messages": sent,
         "snapshot_errors": snapshot.errors,
         "report_errors": report.errors,
         "snapshot_id": snapshot_id,

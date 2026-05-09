@@ -2188,3 +2188,164 @@ body::after {
     grid-column: 1 / 3 !important;
   }
 }
+
+/* ==========================================================================
+   📱 MOBİL HEADER FİX — Üst kısım net sıralı olsun
+   1. SIRA: Logo + Versiyon + Saat (en üst)
+   2. SIRA: Ticker grid (TCMB / REPO / FUNDS / TOP 1Y)
+   3. SIRA: AI Commentary
+   4. SIRA: Paneller
+   ========================================================================== */
+
+@media (max-width: 700px) {
+  /* Header tamamen yeniden yapılandırılıyor */
+  .terminal-header {
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    height: auto !important;
+    min-height: auto !important;
+  }
+
+  /* 1. SIRA: Logo + Saat - üst üste BİNMEZ, yan yana ama düzgün */
+  .header-left {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    padding: 10px 12px !important;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+  }
+
+  .logo {
+    font-size: 16px !important;
+    flex: 1;
+    display: flex !important;
+    align-items: center;
+    gap: 4px;
+    margin: 0 !important;
+    letter-spacing: 0 !important;
+  }
+
+  .logo-icon {
+    font-size: 8px !important;
+  }
+
+  .logo-slash {
+    margin: 0 2px !important;
+    font-size: 12px !important;
+    color: var(--text-muted);
+  }
+
+  .logo-sub {
+    font-size: 10px !important;
+    color: var(--text-secondary) !important;
+    font-weight: normal;
+  }
+
+  .version {
+    display: none !important; /* Mobilde gizli */
+  }
+
+  /* SAĞ KISIM: Saat + Status */
+  .header-right {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex-shrink: 0;
+  }
+
+  .clock-block {
+    display: flex !important;
+    align-items: center !important;
+    gap: 3px !important;
+    font-size: 12px !important;
+  }
+
+  .clock-label {
+    font-size: 9px !important;
+    color: var(--text-muted);
+  }
+
+  .clock {
+    font-size: 11px !important;
+  }
+
+  .cursor {
+    display: none !important; /* Cursor'u gizle, yer kazandırır */
+  }
+
+  .status-block {
+    display: flex !important;
+    align-items: center !important;
+    gap: 3px !important;
+    font-size: 9px !important;
+  }
+
+  .status-label {
+    font-size: 9px !important;
+  }
+
+  /* 2. SIRA: Ticker - kendi sırasında, üst sıraya BİNMEZ */
+  .header-center {
+    display: block !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    flex: none !important;
+  }
+
+  .ticker {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 1px !important;
+    width: 100% !important;
+    padding: 0 !important;
+    background: var(--border);
+    border-bottom: 1px solid var(--border);
+    margin: 0 !important;
+  }
+
+  .ticker-sep {
+    display: none !important;
+  }
+
+  .ticker-item {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2px !important;
+    padding: 8px 10px !important;
+    background: var(--bg-secondary);
+    align-items: flex-start !important;
+  }
+
+  .ticker-label {
+    font-size: 9px !important;
+    color: var(--text-secondary) !important;
+    letter-spacing: 0.1em;
+    line-height: 1;
+  }
+
+  .ticker-value {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    line-height: 1.2;
+  }
+
+  /* 3. SIRA: AI Commentary - yine kendi sırasında */
+  .ai-commentary {
+    margin: 8px 8px 0 !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    padding: 10px 12px !important;
+  }
+
+  /* 4. SIRA: Grid (panellerin başlangıcı) */
+  .grid {
+    margin-top: 8px !important;
+  }
+}

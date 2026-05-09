@@ -35,7 +35,7 @@ from kizilelma.agent.chat import ChatRequest, chat_endpoint
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
-CACHE_TTL_SECONDS = 5 * 60  # 5 dakika
+CACHE_TTL_SECONDS = 15 * 60  # 15 dakika — auto-refresh ile uyumlu
 
 # AI yorumu cache — saatte bir yenilenir (API maliyetini düşürür)
 AI_CACHE_DURATION = dt.timedelta(hours=1)
@@ -154,8 +154,35 @@ class SnapshotCache:
         """Cache'deki ham veri (varsa) — async olmayan erişim için."""
         return self._data
 
+    async def refresh_now(self) -> Optional[dict]:
+        """Cache'i zorla yenile — TTL'a bakmaz, doğrudan canlı çekmeyi dener.
+
+        Auto-refresh loop'u tarafından kullanılır. Hata olursa cache eski
+        haliyle kalır ve None döner; uygulama çökmez.
+
+        Returns:
+            Yenilenen ham snapshot dict'i veya None (hata durumunda).
+        """
+        async with self._lock:
+            from kizilelma.scheduler.daily_job import collect_all_data
+
+            try:
+                snapshot = await collect_all_data()
+                data = snapshot.model_dump(mode="json")
+                data["is_historical"] = False
+                self._data = data
+                self._fetched_at = dt.datetime.now()
+                self._source = "live"
+                return data
+            except Exception as exc:
+                logger.warning("Auto-refresh canlı toplama başarısız: %s", exc)
+                return None
+
 
 _cache = SnapshotCache()
+
+# Auto-refresh task — startup'ta başlar, shutdown'da durdurulur.
+_refresh_task: Optional[asyncio.Task] = None
 
 
 app = FastAPI(
@@ -221,9 +248,89 @@ async def startup_event() -> None:
             asyncio.create_task(_seed_macro_data())
         else:
             logger.info("Macro tablosunda zaten veri var, seed atlandı")
+
+        # Auto-refresh loop'u başlat (hafta içi 09:30-11:00 arası 15 dk'da bir)
+        global _refresh_task
+        if _refresh_task is None or _refresh_task.done():
+            _refresh_task = asyncio.create_task(auto_refresh_loop())
+            logger.info("Auto-refresh loop başlatıldı (hafta içi 09:30-11:00 IST)")
     except Exception as exc:
         # Startup hatası uygulamayı çökertmemeli
         logger.error("DB startup hatası: %s", exc, exc_info=True)
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    """Sunucu kapanırken auto-refresh task'ı temiz şekilde durdur."""
+    global _refresh_task
+    if _refresh_task is not None and not _refresh_task.done():
+        _refresh_task.cancel()
+        try:
+            await _refresh_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Auto-refresh loop durduruldu")
+
+
+# ----------------------------------------------------------------------------
+# Auto-refresh loop — hafta içi mesai saatlerinde TEFAS verisini yeniler
+# ----------------------------------------------------------------------------
+
+async def auto_refresh_loop() -> None:
+    """Hafta içi 09:30-11:00 İstanbul saati arasında her 15 dk veriyi yeniler.
+
+    Strateji:
+        - Pzt-Cum ve saat 09:30-11:00 (IST) içindeyse: refresh + 15 dk uyu
+        - Pencere dışındaysa: 5 dk uyu, sonra tekrar kontrol et
+        - Hata olursa 60 sn uyu, devam et (loop ölmez)
+
+    GitHub Actions cron'u sabah veriyi DB'ye yazar; bu in-process loop ise
+    web app'in cache'ini canlı tutar — kullanıcı yenileyince TEFAS'tan taze
+    veri görür, DB'ye düşmek zorunda kalmaz.
+    """
+    import pytz
+
+    istanbul_tz = pytz.timezone("Europe/Istanbul")
+    window_start = dt.time(9, 30)
+    window_end = dt.time(11, 0)
+
+    while True:
+        try:
+            now = dt.datetime.now(istanbul_tz)
+            is_weekday = now.weekday() < 5  # Pzt=0 ... Cum=4
+            current_time = now.time()
+            in_window = window_start <= current_time <= window_end
+
+            if is_weekday and in_window:
+                logger.info(
+                    "Auto-refresh tetiklendi (%s IST)",
+                    now.strftime("%a %H:%M"),
+                )
+                fresh = await _cache.refresh_now()
+                if fresh is not None:
+                    funds_count = len(fresh.get("funds") or [])
+                    macro_count = len(fresh.get("macro_data") or [])
+                    logger.info(
+                        "Auto-refresh OK: %d fon, %d makro",
+                        funds_count,
+                        macro_count,
+                    )
+                else:
+                    logger.warning("Auto-refresh başarısız oldu (cache eski kalıyor)")
+
+                # 15 dakika sonra tekrar dene
+                await asyncio.sleep(15 * 60)
+            else:
+                # Pencere dışı — 5 dakika sonra tekrar kontrol et
+                await asyncio.sleep(5 * 60)
+
+        except asyncio.CancelledError:
+            logger.info("Auto-refresh loop iptal edildi (shutdown)")
+            raise
+        except Exception as exc:
+            # Beklenmeyen hata — loop'u öldürme, kısa bekle ve devam
+            logger.error("Auto-refresh loop hatası: %s", exc, exc_info=True)
+            await asyncio.sleep(60)
 
 
 async def _seed_macro_data() -> None:

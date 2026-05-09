@@ -1,0 +1,82 @@
+name: Otomatik Veri Yenileme (Sabah)
+
+# Hafta içi (Pzt-Cum) sabah 09:30-10:30 İstanbul saati arasında
+# her 15 dakikada bir TEFAS + makro verileri yeniler.
+#
+# İstanbul = UTC+3, dolayısıyla:
+#   09:30 IST = 06:30 UTC
+#   09:45 IST = 06:45 UTC
+#   10:00 IST = 07:00 UTC
+#   10:15 IST = 07:15 UTC
+#   10:30 IST = 07:30 UTC
+#
+# Not: GitHub Actions cron'u her zaman dakikası dakikasına çalışmaz
+# (genelde 5-15 dk gecikme olabilir), o yüzden web app'teki in-process
+# auto-refresh loop ikinci güvence olarak çalışır.
+
+on:
+  schedule:
+    - cron: "30,45 6 * * 1-5"   # 09:30 ve 09:45 İstanbul
+    - cron: "0,15,30 7 * * 1-5"  # 10:00, 10:15 ve 10:30 İstanbul
+  workflow_dispatch:  # Manuel tetikleme
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: DB cache restore (geçmiş veriler)
+        uses: actions/cache@v4
+        with:
+          path: kizilelma.db
+          key: kizilelma-db-${{ github.run_number }}
+          restore-keys: |
+            kizilelma-db-
+
+      - name: Refresh data (hata olsa bile devam)
+        env:
+          TCMB_API_KEY: ${{ secrets.TCMB_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        continue-on-error: true
+        run: |
+          python -c "
+          import asyncio
+          from kizilelma.scheduler.daily_job import collect_all_data
+
+          async def refresh():
+              snap = await collect_all_data()
+              print(
+                  f'Yenilendi: {len(snap.funds)} fon, '
+                  f'{len(snap.macro_data)} makro, '
+                  f'{len(snap.repo_rates)} repo'
+              )
+
+          asyncio.run(refresh())
+          "
+
+      - name: Upload DB as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kizilelma-db-refresh-${{ github.run_id }}
+          path: kizilelma.db
+          retention-days: 7

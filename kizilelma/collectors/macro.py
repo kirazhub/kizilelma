@@ -23,6 +23,7 @@ from typing import Optional
 
 import httpx
 
+from kizilelma.agent.cache import TTLCache
 from kizilelma.collectors.base import BaseCollector
 from kizilelma.models import MacroData
 
@@ -121,11 +122,33 @@ class MacroCollector(BaseCollector):
 
     name = "macro"
 
+    # Sınıf-seviyesi cache: tüm instance'lar paylaşır.
+    # 5 dakika içinde aynı veri tekrar istenirse scraping yapılmaz.
+    _cache: TTLCache = TTLCache(ttl_seconds=300)
+    _CACHE_KEY = "macro_data"
+
     def __init__(self, timeout: float = 30.0) -> None:
         self.timeout = timeout
 
     async def fetch(self) -> list[MacroData]:
-        """Tüm makro verileri topla.
+        """Tüm makro verileri topla (5 dakika cache'lenir).
+
+        İlk çağrıda gerçek scraping yapılır ve sonuç cache'lenir.
+        5 dakika içindeki sonraki çağrılar cache'den anında döner.
+        """
+        cached = self._cache.get(self._CACHE_KEY)
+        if cached is not None:
+            return cached
+
+        # Cache miss — gerçek fetch işlemini yap
+        results = await self._do_fetch()
+        # Sadece anlamlı sonuç varsa cache'le (boş liste de cache'lenir
+        # ki ardı ardına başarısız scraping'leri tekrarlama)
+        self._cache.set(self._CACHE_KEY, results)
+        return results
+
+    async def _do_fetch(self) -> list[MacroData]:
+        """Asıl scraping mantığı. `fetch()` bunun cache'li sarmalayıcısıdır.
 
         Önce ana sayfadan (tek istek) tüm verileri çekmeye çalışır; ana
         sayfada bulunmayan semboller için subdomain'lere ek istek atar.

@@ -8,6 +8,7 @@ from typing import Optional
 
 from sqlmodel import Session, select
 
+from kizilelma.collectors.tags import extract_tags
 from kizilelma.storage.db import get_engine
 from kizilelma.storage.models import (
     FundRecord, RepoRecord, BondRecord,
@@ -80,15 +81,31 @@ def retrieve_context(question: str, engine=None) -> dict:
             "tahvil": "Borçlanma",
         }
 
-        # Sektör keyword'leri
+        # Sektör keyword'leri  →  asset_tags içindeki resmi etiket karşılığı.
+        # Anahtar: kullanıcının soruda yazabileceği sözcük (lowercase, TR).
+        # Değer:   extract_tags()'in ürettiği canonical etiket (case-sensitive!).
         sector_keywords = {
-            "banka": "banka",
-            "teknoloji": "teknoloji",
-            "sanayi": "sanayi",
-            "enerji": "enerji",
-            "gıda": "gıda",
-            "sağlık": "sağlık",
-            "otomotiv": "otomotiv",
+            "banka": "Banka",
+            "bankac": "Banka",
+            "teknoloji": "Teknoloji",
+            "bilişim": "Teknoloji",
+            "yazılım": "Teknoloji",
+            "sanayi": "Sanayi",
+            "enerji": "Enerji",
+            "petrol": "Enerji",
+            "gıda": "Gıda",
+            "sağlık": "Sağlık",
+            "ilaç": "Sağlık",
+            "otomotiv": "Otomotiv",
+            "gayrimenkul": "Gayrimenkul",
+            "emlak": "Gayrimenkul",
+            "metal": "Metal",
+            "kimya": "Kimya",
+            "tekstil": "Tekstil",
+            "turizm": "Turizm",
+            "savunma": "Savunma",
+            "telekom": "Telekom",
+            "ulaştırma": "Ulaştırma",
         }
 
         # ---- Fonlar ----
@@ -124,21 +141,50 @@ def retrieve_context(question: str, engine=None) -> dict:
                         context["funds"] = [_fund_to_dict(f) for f in funds]
                     break
 
-        # Sektör sorgusu
+        # Sektör sorgusu — asset_tags ile arama (runtime'da hesaplanır).
+        # FundRecord tablosunda asset_tags kolonu YOK, bu yüzden geniş bir aday
+        # kümesi çekip Python tarafında filtreliyoruz. Performans için 1Y'a
+        # göre sıralı ilk 200 kayıt yeter (Türkiye'de toplam fon sayısı zaten
+        # bu seviyede).
         elif any(kw in q_lower for kw in sector_keywords):
-            for kw in sector_keywords:
+            matched_tag: Optional[str] = None
+            matched_kw: Optional[str] = None
+            for kw, tag in sector_keywords.items():
                 if kw in q_lower:
-                    stmt = (
+                    matched_tag = tag
+                    matched_kw = kw
+                    break
+
+            if matched_tag:
+                # Aday kümesi: snapshot'taki tüm fonlar, 1Y getiriye göre sıralı
+                stmt = (
+                    select(FundRecord)
+                    .where(FundRecord.snapshot_id == snap_id)
+                    .order_by(FundRecord.return_1y.desc())
+                    .limit(200)
+                )
+                candidates = list(session.exec(stmt))
+
+                # Tag bazlı filtre: ad+kategoriden runtime'da etiket türet
+                tagged = [
+                    f for f in candidates
+                    if matched_tag in extract_tags(f.name or "", f.category or "")
+                ]
+
+                # Hiç tutmadıysa: ad/kategori üzerinde basit LIKE araması
+                # (yedek). Etiketleyici kelimeyi ararız.
+                if not tagged and matched_kw:
+                    fallback_stmt = (
                         select(FundRecord)
                         .where(FundRecord.snapshot_id == snap_id)
-                        .where(FundRecord.name.like(f"%{kw.upper()}%"))
+                        .where(FundRecord.name.ilike(f"%{matched_kw}%"))
                         .order_by(FundRecord.return_1y.desc())
                         .limit(10)
                     )
-                    funds = list(session.exec(stmt))
-                    if funds:
-                        context["funds"] = [_fund_to_dict(f) for f in funds]
-                    break
+                    tagged = list(session.exec(fallback_stmt))
+
+                if tagged:
+                    context["funds"] = [_fund_to_dict(f) for f in tagged[:10]]
 
         # En iyi / en yüksek sorusu
         elif any(kw in q_lower for kw in ["en iyi", "en yüksek", "en kar", "top"]):
@@ -221,7 +267,12 @@ def retrieve_context(question: str, engine=None) -> dict:
 
 
 def _fund_to_dict(f: FundRecord) -> dict:
-    """FundRecord'ı AI için temiz dict'e çevir."""
+    """FundRecord'ı AI için temiz dict'e çevir.
+
+    Not: ``FundRecord`` tablosunda ``asset_tags`` kolonu yok (eski şema).
+    Bu yüzden her seferinde fon adı + kategoriden runtime'da hesaplıyoruz.
+    Saf ve hızlı bir regex eşleme olduğu için DB roundtrip yapmaktan ucuz.
+    """
     return {
         "code": f.code,
         "name": f.name,
@@ -234,6 +285,7 @@ def _fund_to_dict(f: FundRecord) -> dict:
         "return_1y": round(f.return_1y, 2) if f.return_1y else None,
         "is_qualified": f.is_qualified_investor,
         "date": f.date.isoformat() if f.date else None,
+        "asset_tags": extract_tags(f.name or "", f.category or ""),
     }
 
 
@@ -248,8 +300,11 @@ def format_context_for_prompt(context: dict) -> str:
     if funds:
         parts.append("### İLGİLİ FONLAR")
         for f in funds:
+            tags_list = f.get("asset_tags") or []
+            tags_str = ", ".join(tags_list) if tags_list else "-"
             parts.append(
                 f"- {f['code']} | {f['name'][:40]} | Kategori: {f['category']} | "
+                f"Etiketler: {tags_str} | "
                 f"Fiyat: {f['price']} TL | "
                 f"1G: %{f['return_1d'] or '-'} | 1A: %{f['return_1m'] or '-'} | "
                 f"3A: %{f['return_3m'] or '-'} | 1Y: %{f['return_1y'] or '-'}"

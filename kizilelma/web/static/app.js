@@ -545,11 +545,11 @@ function renderFunds() {
             (f) => `
           <tr>
             <td class="code">${escapeHtml(f.code)}</td>
-            <td class="name">${escapeHtml(truncate(f.name, 32))}</td>
-            <td class="num ${colorClass(f.return_1d)}">${fmtPct(f.return_1d)}</td>
-            <td class="num ${colorClass(f.return_1m)}">${fmtPct(f.return_1m)}</td>
-            <td class="num ${colorClass(f.return_1y)}">${fmtPct(f.return_1y)}</td>
-            <td class="num">${fmtNum(f.price, 4)}</td>
+            <td class="name">${escapeHtml(truncate(f.name, 50))}</td>
+            <td class="num ${colorClass(f.return_1d)}" data-label="1G">${fmtPct(f.return_1d)}</td>
+            <td class="num ${colorClass(f.return_1m)}" data-label="1A">${fmtPct(f.return_1m)}</td>
+            <td class="num ${colorClass(f.return_1y)}" data-label="1Y">${fmtPct(f.return_1y)}</td>
+            <td class="num" data-label="FİYAT">${fmtNum(f.price, 4)}</td>
           </tr>`,
           )
           .join('')}

@@ -1953,3 +1953,238 @@ body::after {
     font-size: 16px !important;
   }
 }
+
+/* ==========================================================================
+   📱 MOBİL — RADİKAL CARD LAYOUT (700px ve altı) - ZORUNLU
+   Tablolar kart formatına dönüşür, yatay kaydırma asla olmaz
+   ========================================================================== */
+
+@media (max-width: 700px) {
+  /* GLOBAL — TÜM YATAY KAYDIRMA YASAKLAR */
+  * {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  html, body, .grid, .panel, .panel-body, .right-column {
+    overflow-x: hidden !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+  }
+
+  /* DATA TABLE — KART HALİNE DÖNÜŞSÜN */
+  .data-table {
+    display: block !important;
+    width: 100% !important;
+    border-collapse: collapse;
+  }
+
+  .data-table thead {
+    display: none !important; /* Mobile başlıklar gizleniyor, satır içinde göstereceğiz */
+  }
+
+  .data-table tbody {
+    display: block !important;
+    width: 100%;
+  }
+
+  .data-table tbody tr {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 4px 8px;
+    padding: 10px 8px;
+    margin-bottom: 6px;
+    background: var(--bg-tertiary);
+    border-left: 3px solid var(--accent-amber);
+    border-radius: 3px;
+  }
+
+  .data-table tbody tr:hover {
+    background: var(--bg-tertiary) !important;
+  }
+
+  .data-table tbody td {
+    display: flex !important;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 0 !important;
+    border: none !important;
+    font-size: 11px !important;
+    line-height: 1.3;
+  }
+
+  /* Her hücreye etiket eklensin (data-label kullanmazsa) */
+  .data-table tbody td.code {
+    grid-column: 1 / 3;
+    grid-row: 1;
+    font-size: 14px !important;
+    font-weight: 700;
+    color: var(--accent-amber) !important;
+    letter-spacing: 0.05em;
+  }
+
+  .data-table tbody td.name {
+    grid-column: 1 / 4;
+    grid-row: 2;
+    font-size: 11px !important;
+    color: var(--text-secondary);
+    word-wrap: break-word;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+  }
+
+  .data-table tbody td.num {
+    grid-row: 1;
+    text-align: left !important;
+    font-size: 11px !important;
+    font-weight: 600;
+  }
+
+  /* Sayısal hücrelerin önüne label ekle */
+  .data-table tbody td.num::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 8px !important;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+    font-weight: normal;
+  }
+
+  /* TOP PICKS özel */
+  .top-picks-table tbody tr {
+    grid-template-columns: 32px 60px 1fr auto !important;
+    grid-template-rows: auto !important;
+    gap: 8px !important;
+    padding: 8px !important;
+    align-items: center;
+  }
+
+  .top-picks-table .rank {
+    grid-column: 1;
+    font-size: 14px !important;
+  }
+
+  .top-picks-table .code {
+    grid-column: 2;
+    font-size: 12px !important;
+  }
+
+  .top-picks-table .name {
+    grid-column: 3 !important;
+    grid-row: auto !important;
+    font-size: 10px !important;
+  }
+
+  .top-picks-table .num {
+    grid-column: 4 !important;
+    text-align: right !important;
+    font-size: 12px !important;
+  }
+
+  .top-picks-table .num::before {
+    display: none !important;
+  }
+
+  /* TCMB paneli — kart layout */
+  .tcmb-rate {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+    padding: 10px !important;
+    background: var(--bg-tertiary);
+    border-left: 3px solid var(--accent-cyan);
+    border-radius: 3px;
+    margin-bottom: 6px;
+  }
+
+  /* Header — sıkı paketleyici */
+  .header {
+    flex-wrap: wrap !important;
+    padding: 6px 8px !important;
+    gap: 6px !important;
+  }
+
+  .header-left {
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+  }
+
+  .logo {
+    font-size: 16px !important;
+  }
+
+  /* Ticker tek kolon zorla */
+  .ticker {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+    width: 100% !important;
+    padding: 8px !important;
+  }
+
+  .ticker-item {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 1px !important;
+    padding: 4px 6px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+  }
+
+  /* Status bar (alt) - mobil sıkıştır */
+  .status-bar {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 4px 10px !important;
+    padding: 6px 8px !important;
+    font-size: 9px !important;
+  }
+
+  .status-bar > span,
+  .status-bar > div,
+  .status-bar-item {
+    text-align: left !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* AI Commentary — yatay yer kaplamasin */
+  .ai-commentary {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    margin: 8px !important;
+    padding: 10px 12px !important;
+  }
+
+  /* Freshness banner */
+  .freshness-banner {
+    flex-wrap: wrap !important;
+    padding: 6px 10px !important;
+    font-size: 10px !important;
+    gap: 4px 10px !important;
+  }
+}
+
+/* Çok küçük ekran (320-380px) */
+@media (max-width: 380px) {
+  .ticker {
+    grid-template-columns: 1fr !important;
+  }
+
+  .data-table tbody tr {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .data-table tbody td.code {
+    grid-column: 1 / 3 !important;
+  }
+
+  .data-table tbody td.name {
+    grid-column: 1 / 3 !important;
+  }
+}

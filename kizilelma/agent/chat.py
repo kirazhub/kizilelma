@@ -135,9 +135,10 @@ async def stream_chat_response(
     try:
         context = retrieve_context(message)
         
-        # Eğer context'te makro veri yoksa, snapshot cache'den almayı dene
+        # Eğer context'te makro veri yoksa, async olarak canlı çek
         if not context.get("macro_data"):
             try:
+                # Önce cache dene (hızlı)
                 from kizilelma.web.app import _cache as _snapshot_cache
                 cached_data = _snapshot_cache.get_cached_data()
                 if cached_data:
@@ -158,6 +159,29 @@ async def stream_chat_response(
                         logger.info(f"Macro verileri cache'den alindi: {len(macros)} öge")
             except Exception as cache_exc:
                 logger.warning(f"Snapshot cache okunamadi: {cache_exc}")
+            
+            # Cache de boşsa direkt async fetch (hızlı, 5-10 sn)
+            if not context.get("macro_data"):
+                try:
+                    from kizilelma.collectors.macro import MacroCollector
+                    macro_collector = MacroCollector(timeout=10.0)
+                    macro_data_list = await macro_collector.fetch()
+                    if macro_data_list:
+                        context["macro_data"] = [
+                            {
+                                "symbol": m.symbol,
+                                "name": m.name,
+                                "value": float(m.value),
+                                "currency": m.currency,
+                                "change_pct": float(m.change_pct) if m.change_pct is not None else None,
+                                "category": m.category,
+                                "date": m.date.isoformat(),
+                            }
+                            for m in macro_data_list
+                        ]
+                        logger.info(f"Macro verileri canli cekildi: {len(macro_data_list)} öge")
+                except Exception as fetch_exc:
+                    logger.warning(f"Macro canli fetch hatasi: {fetch_exc}")
         
         context_text = format_context_for_prompt(context)
     except Exception as exc:

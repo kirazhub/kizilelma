@@ -292,35 +292,29 @@ def retrieve_context(question: str, engine=None) -> dict:
     # Bu, yeni deploy'lardan sonra DB henüz dolmadan AI'ın çalışmasını sağlar.
     if not context["macro_data"]:
         try:
-            from kizilelma.collectors.macro import MacroCollector
-            import asyncio
+            # Senkron HTTP ile snapshot çek - kendi sunucumuza istek
+            import httpx
             
-            macro_collector = MacroCollector()
-            
-            # Eğer event loop varsa onu kullan (FastAPI içinde)
-            try:
-                loop = asyncio.get_running_loop()
-                # Running loop varsa - thread executor ile çalıştır
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, macro_collector.fetch())
-                    macro_data = future.result(timeout=15)
-            except RuntimeError:
-                # Loop yoksa - direkt çalıştır
-                macro_data = asyncio.run(macro_collector.fetch())
-            
-            context["macro_data"] = [
-                {
-                    "symbol": m.symbol,
-                    "name": m.name,
-                    "value": float(m.value),
-                    "currency": m.currency,
-                    "change_pct": float(m.change_pct) if m.change_pct is not None else None,
-                    "category": m.category,
-                    "date": m.date.isoformat(),
-                }
-                for m in macro_data
-            ]
+            # Lokal istek - localhost'a çağrı yap
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get("http://localhost:8000/api/snapshot")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    snap = data.get("data", data)
+                    macro_list = snap.get("macro_data", [])
+                    
+                    context["macro_data"] = [
+                        {
+                            "symbol": m.get("symbol", ""),
+                            "name": m.get("name", ""),
+                            "value": float(m.get("value", 0)),
+                            "currency": m.get("currency", "TRY"),
+                            "change_pct": float(m["change_pct"]) if m.get("change_pct") else None,
+                            "category": m.get("category", ""),
+                            "date": m.get("date", ""),
+                        }
+                        for m in macro_list
+                    ]
         except Exception as exc:
             # Tamamen başarısız olursa sessizce geç
             pass

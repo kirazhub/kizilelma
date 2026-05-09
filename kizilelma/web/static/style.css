@@ -1362,6 +1362,12 @@ body::after {
   position: relative;
 }
 
+/* Hidden attribute override — 'display: flex' varsayılan [hidden]'ı etkisizleştiriyordu */
+.chat-panel[hidden],
+.chat-toggle[hidden] {
+  display: none !important;
+}
+
 @keyframes chatSlideUp {
   from {
     opacity: 0;
